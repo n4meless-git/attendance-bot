@@ -1,0 +1,17 @@
+{
+  "name": "attendance-bot",
+  "version": "1.0.0",
+  "description": "Discord attendance bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "@supabase/supabase-js": "^2.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
