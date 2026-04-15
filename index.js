@@ -21,13 +21,12 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     const username = message.author.username;
     
-    // 한국 시간 0시 기준 설정
+    // 한국 시간 0시 기준 설정 (UTC+9)
     const now = new Date();
     const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
     const today = kstDate.toISOString().split('T')[0];
 
     try {
-        // [수정] 테이블의 실제 컬럼명인 last_checkin 사용
         const { data: user, error: selectError } = await supabase
             .from('attendance')
             .select('*')
@@ -36,9 +35,9 @@ client.on('messageCreate', async (message) => {
 
         if (selectError) throw selectError;
 
-        // 1. 이미 오늘 출근했는지 확인
+        // 1. 중복 출근 체크
         if (user && user.last_checkin === today) {
-            return message.reply(`이미 오늘 출근하셨어요! ✨\n(인식된 날짜: ${today})`);
+            return message.reply(`이미 오늘 출근하셨어요! ✨\n(인식 날짜: ${today})`);
         }
 
         // 2. 연속 출근 계산
@@ -53,7 +52,7 @@ client.on('messageCreate', async (message) => {
             }
         }
 
-        // 3. 데이터 저장 (last_checkin 이름으로!)
+        // 3. DB 업데이트
         const { error: upsertError } = await supabase
             .from('attendance')
             .upsert({
@@ -65,11 +64,11 @@ client.on('messageCreate', async (message) => {
 
         if (upsertError) throw upsertError;
 
-        message.reply(`✅ **출근 완료!** 현재 **${newStreak}일** 연속 출근 중! 🔥\n(봇 인식 시각: ${today} 00:00 이후)`);
+        message.reply(`✅ **출근 완료!** 현재 **${newStreak}일** 연속 출근 중! 🔥\n(기준 날짜: ${today})`);
 
     } catch (err) {
-        console.error(err);
-        message.reply("⚠️ 오류 발생! 로그를 확인하세요.");
+        console.error("에러:", err);
+        message.reply("⚠️ DB 처리 중 오류가 발생했습니다!");
     }
 });
 
