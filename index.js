@@ -30,7 +30,6 @@ function getRemindMessage(hour) {
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
-    // 알림 스케줄러: 매시 정각(0분)마다 실행
     cron.schedule('0 * * * *', async () => {
         const now = new Date();
         const kstOffset = 9 * 60 * 60 * 1000;
@@ -46,14 +45,12 @@ client.once('ready', () => {
             const { data: allUsers } = await supabase.from('attendance').select('*');
             if (allUsers) {
                 for (const user of allUsers) {
-                    // 오늘 아직 출근 안 한 유저만 타겟팅
                     if (user.last_checkin !== today) {
                         try {
                             const discordUser = await client.users.fetch(user.user_id);
                             await discordUser.send(`🔔 <@${user.user_id}>님! ${messageText}`);
-                            console.log(`✉️ ${user.username}님께 DM 전송 완료 (${currentHour}시)`);
                         } catch (err) {
-                            console.error(`${user.username} DM 전송 실패:`, err.message);
+                            console.error(`${user.username} DM 전송 실패`);
                         }
                     }
                 }
@@ -71,22 +68,23 @@ client.on('messageCreate', async (message) => {
     const kstOffset = 9 * 60 * 60 * 1000;
     const kstDate = new Date(now.getTime() + kstOffset);
     const today = kstDate.toISOString().split('T')[0];
-    const currentHour = kstDate.getUTCHours();
+    const currentHour = kstDate.getUTCHours(); // 여기서 정의한 변수명을 사용해야 함
 
     // [테스트 기능] "듀오링고"라고 치면 즉시 DM 발송 체크
     if (message.content === "듀오링고") {
-        const testMsg = getRemindMessage(currentHour) || "현재는 정기 알림 시간이 아니지만, 시스템은 정상입니다! 🔥";
+        const testMsg = getRemindMessage(currentHour); 
+        const finalMsg = testMsg ? testMsg : `현재 한국 시간 ${currentHour}시입니다. (정기 알림 대기 중)`;
+
         try {
-            await message.author.send(`🧪 **[테스트 알림]**\n🔔 <@${userId}>님! ${testMsg}`);
-            return message.reply("성공! 개인 DM을 확인해보세요. 📩");
+            await message.author.send(`🧪 **[테스트 알림]**\n🔔 <@${userId}>님! ${finalMsg}`);
+            return message.reply(`성공! 지금 한국 시간은 ${currentHour}시로 인식되고 있어.`);
         } catch (err) {
-            return message.reply("DM을 보낼 수 없어요. 설정을 확인해주세요!");
+            return message.reply("DM 전송 실패! 설정 확인해봐.");
         }
     }
 
     if (message.content !== "출근") return;
 
-    // 새벽 0시 ~ 4시 출근 제한
     if (currentHour >= 0 && currentHour < 4) {
         return message.reply("🚫 **지금은 출근 금지 시간입니다!**\n상쾌한 아침 공기를 마시며 다시 와주세요! 😴");
     }
