@@ -13,7 +13,6 @@ const client = new Client({
     ]
 });
 
-// 알림 메시지 결정 함수
 function getRemindMessage(hour) {
     if (hour === 11) return "좋은 아침이에요! 오늘도 잊지 말고 출근 도장 꾹 눌러주세요? ✨";
     if (hour === 14) return "벌써 오후 2시에요! 설마 오늘 출근 까먹으신 건 아니죠...? 얼른 오세요! 🤨";
@@ -32,12 +31,9 @@ client.once('ready', () => {
 
     cron.schedule('0 * * * *', async () => {
         const now = new Date();
-        const kstOffset = 9 * 60 * 60 * 1000;
-        const kstDate = new Date(now.getTime() + kstOffset);
+        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
         const today = kstDate.toISOString().split('T')[0];
         const currentHour = kstDate.getUTCHours();
-
-        console.log(`⏰ 알림 체크: 현재 한국 시간 ${currentHour}시`);
 
         const messageText = getRemindMessage(currentHour);
         
@@ -49,9 +45,7 @@ client.once('ready', () => {
                         try {
                             const discordUser = await client.users.fetch(user.user_id);
                             await discordUser.send(`🔔 <@${user.user_id}>님! ${messageText}`);
-                        } catch (err) {
-                            console.error(`${user.username} DM 전송 실패`);
-                        }
+                        } catch (err) { console.error(`${user.username} DM 전송 실패`); }
                     }
                 }
             }
@@ -63,23 +57,24 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const userId = message.author.id;
-    const username = message.author.username;
     const now = new Date();
-    const kstOffset = 9 * 60 * 60 * 1000;
-    const kstDate = new Date(now.getTime() + kstOffset);
+    const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
     const today = kstDate.toISOString().split('T')[0];
-    const currentHour = kstDate.getUTCHours(); // 여기서 정의한 변수명을 사용해야 함
+    const currentHour = kstDate.getUTCHours();
 
-    // [테스트 기능] "듀오링고"라고 치면 즉시 DM 발송 체크
+    // 듀오링고 테스트 로직 (윤호가 요청한 대로 분리)
     if (message.content === "듀오링고") {
-        const testMsg = getRemindMessage(currentHour); 
+        const testMsg = getRemindMessage(currentHour);
         const finalMsg = testMsg ? testMsg : `현재 한국 시간 ${currentHour}시입니다. (정기 알림 대기 중)`;
 
         try {
+            // 1. 개인 DM으로는 시간에 맞는 멘트를 보냄
             await message.author.send(`🧪 **[테스트 알림]**\n🔔 <@${userId}>님! ${finalMsg}`);
-            return message.reply(`성공! 지금 한국 시간은 ${currentHour}시로 인식되고 있어.`);
+            
+            // 2. 채널 답장으로는 깔끔하게 성공 메시지만 보냄
+            return message.reply("성공! 개인 DM을 확인해보세요. 📩");
         } catch (err) {
-            return message.reply("DM 전송 실패! 설정 확인해봐.");
+            return message.reply("DM 전송에 실패했습니다. 설정을 확인해 보세요!");
         }
     }
 
@@ -117,7 +112,7 @@ client.on('messageCreate', async (message) => {
             .from('attendance')
             .upsert({
                 user_id: userId,
-                username: username,
+                username: message.author.username,
                 last_checkin: today,
                 streak: newStreak
             }, { onConflict: 'user_id' });
@@ -127,7 +122,7 @@ client.on('messageCreate', async (message) => {
 
     } catch (err) {
         console.error(err);
-        message.reply("⚠️ DB 처리 중 오류가 발생했습니다!");
+        message.reply("⚠️ DB 처리 오류 발생!");
     }
 });
 
