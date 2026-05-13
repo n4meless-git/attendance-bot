@@ -78,7 +78,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    if (message.content !== "출근") return;
+    if (message.content !== "출근","출","근","出勤","출 근","출.","근.") return;
 
     if (currentHour >= 0 && currentHour < 4) {
         return message.reply("🚫 **지금은 출근 금지 시간입니다!**\n상쾌한 아침 공기를 마시며 다시 와주세요! 😴");
