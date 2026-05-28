@@ -26,7 +26,7 @@ function getRemindMessage(hour) {
     return null;
 }
 
-// 재원이 대리 출근 핵심 로직 (스케줄러와 !재원 명령어에서 공통으로 사용)
+// 🛡️ 재원이 대리 출근 공통 핵심 로직 (10토큰 차감 기능 추가)
 async function runJaewonAttendance() {
     const now = new Date();
     const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
@@ -43,9 +43,19 @@ async function runJaewonAttendance() {
 
     if (selectError) throw selectError;
 
+    // 이미 오늘 직접 출근했거나 대리 출근이 완료된 상태라면 스킵
     if (user && user.last_checkin === today) {
-        return { success: false, reason: "이미 오늘 출근 처리가 되어 있습니다.", streak: user.streak };
+        return { success: false, status: "ALREADY", reason: "이미 오늘 출근 처리가 되어 있습니다.", streak: user.streak };
     }
+
+    // 💸 대리 출근용 토큰 검사 및 차감 (기본값 200토큰 설정)
+    let currentTokens = user ? (user.tokens ?? 200) : 200;
+    if (currentTokens < 10) {
+        return { success: false, status: "NO_TOKEN", reason: "보유 토큰이 부족합니다. (대리 출근에는 10 토큰이 필요합니다.)", streak: user ? user.streak : 0 };
+    }
+
+    // 10토큰 감소
+    currentTokens -= 10;
 
     let newStreak = 1;
     if (user && user.last_checkin) {
@@ -58,7 +68,6 @@ async function runJaewonAttendance() {
         }
     }
 
-    const currentTokens = user ? (user.tokens ?? 200) : 200;
     const currentCards = user ? (user.protection_cards ?? 0) : 0;
 
     await supabase.from('attendance').upsert({
@@ -70,20 +79,24 @@ async function runJaewonAttendance() {
         protection_cards: currentCards
     }, { onConflict: 'user_id' });
 
-    return { success: true, streak: newStreak };
+    return { success: true, streak: newStreak, remainingTokens: currentTokens };
 }
 
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
-    // 🛡️ 재원이 대리 출근 스케줄러 (매일 밤 9시 정각에 자동 출근 도장)
-    cron.schedule('0 21 * * *', async () => {
+    // ⏰ 재원이 자동 대리 출근 스케줄러 (매일 밤 11시 정각에 자동 출근 도장)
+    cron.schedule('0 23 * * *', async () => {
         try {
             const result = await runJaewonAttendance();
             if (result.success) {
-                console.log(`✨ [자동완료] 재원이 대리 출근 처리 성공! 현재 연속 ${result.streak}일째.`);
+                console.log(`✨ [자동완료] 23시까지 재원이 출근 기록이 없어 대리 출근 처리했습니다. (연속 ${result.streak}일째 | 남은 토큰: ${result.remainingTokens})`);
             } else {
-                console.log(`[재원봇] ${result.reason}`);
+                if (result.status === "ALREADY") {
+                    console.log(`[재원봇] 23시 대리 출근 스케줄러 스킵: 재원이가 이미 오늘 출근을 완료했습니다.`);
+                } else if (result.status === "NO_TOKEN") {
+                    console.log(`[재원봇] 23시 대리 출근 실패: 재원이의 토큰이 부족합니다. (${result.reason})`);
+                }
             }
         } catch (err) {
             console.error("❌ 재원이 대리 출근 스케줄러 작동 실패:", err);
@@ -166,17 +179,17 @@ client.on('messageCreate', async (message) => {
     // 🧪 재원이 대리 출근 수동 테스트 명령어
     if (message.content === "!재원") {
         try {
-            await message.channel.sendTyping(); // 봇이 입력 중인 상태 표시
+            await message.channel.sendTyping();
             const result = await runJaewonAttendance();
             
             if (result.success) {
-                return message.reply(`🎯 **[테스트 완료]** 재원이 대리 출근 처리에 성공했습니다!\n🔥 현재 연속 **${result.streak}일째** 출근 중으로 갱신되었습니다.`);
+                return message.reply(`🎯 **[수동 완료]** 재원이 대리 출근 처리에 성공했습니다!\n💰 수수료로 **10 토큰**이 차감되었습니다. (잔여: 💰 \`${result.remainingTokens} 토큰\`)\n🔥 현재 연속 **${result.streak}일째** 출근 중입니다.`);
             } else {
-                return message.reply(`ℹ️ **[테스트 알림]** 재원이는 ${result.reason} (현재 스트릭: \`${result.streak}일\`)`);
+                return message.reply(`ℹ️ **[스킵 알림]** 재원이는 ${result.reason} (현재 스트릭: \`${result.streak}일\`)`);
             }
         } catch (err) {
             console.error(err);
-            return message.reply("❌ **[테스트 실패]** 재원이 DB 처리 중 오류가 발생했습니다. 로그를 확인하세요.");
+            return message.reply("❌ **[오류 발생]** 재원이 DB 처리 중 문제가 발생했습니다.");
         }
     }
 
