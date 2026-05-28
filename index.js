@@ -26,61 +26,65 @@ function getRemindMessage(hour) {
     return null;
 }
 
+// 재원이 대리 출근 핵심 로직 (스케줄러와 !재원 명령어에서 공통으로 사용)
+async function runJaewonAttendance() {
+    const now = new Date();
+    const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const today = kstDate.toISOString().split('T')[0];
+    
+    const JAEWON_ID = "1152202483666538516";
+    const JAEWON_NAME = "smphur08";
+
+    const { data: user, error: selectError } = await supabase
+        .from('attendance')
+        .select('*')
+        .eq('user_id', JAEWON_ID)
+        .maybeSingle();
+
+    if (selectError) throw selectError;
+
+    if (user && user.last_checkin === today) {
+        return { success: false, reason: "이미 오늘 출근 처리가 되어 있습니다.", streak: user.streak };
+    }
+
+    let newStreak = 1;
+    if (user && user.last_checkin) {
+        const yesterday = new Date(kstDate);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+        if (user.last_checkin === yesterdayStr) {
+            newStreak = (user.streak || 0) + 1;
+        }
+    }
+
+    const currentTokens = user ? (user.tokens ?? 200) : 200;
+    const currentCards = user ? (user.protection_cards ?? 0) : 0;
+
+    await supabase.from('attendance').upsert({
+        user_id: JAEWON_ID,
+        username: JAEWON_NAME,
+        last_checkin: today,
+        streak: newStreak,
+        tokens: currentTokens,
+        protection_cards: currentCards
+    }, { onConflict: 'user_id' });
+
+    return { success: true, streak: newStreak };
+}
+
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
     // 🛡️ 재원이 대리 출근 스케줄러 (매일 밤 9시 정각에 자동 출근 도장)
     cron.schedule('0 21 * * *', async () => {
-        const now = new Date();
-        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const today = kstDate.toISOString().split('T')[0];
-        
-        // 🎯 분석 완료된 재원이의 실제 디스코드 ID
-        const JAEWON_ID = "1152202483666538516";
-        const JAEWON_NAME = "smphur08";
-
         try {
-            const { data: user, error: selectError } = await supabase
-                .from('attendance')
-                .select('*')
-                .eq('user_id', JAEWON_ID)
-                .maybeSingle();
-
-            if (selectError) throw selectError;
-
-            // 이미 오늘 출근했거나 대리 출근이 찍혔다면 중복 방지
-            if (user && user.last_checkin === today) {
-                console.log(`[재원봇] 재원이는 이미 오늘 출근 처리가 되어 있습니다.`);
-                return;
+            const result = await runJaewonAttendance();
+            if (result.success) {
+                console.log(`✨ [자동완료] 재원이 대리 출근 처리 성공! 현재 연속 ${result.streak}일째.`);
+            } else {
+                console.log(`[재원봇] ${result.reason}`);
             }
-
-            // 연속 출근 일수(Streak) 보존 계산
-            let newStreak = 1;
-            if (user && user.last_checkin) {
-                const yesterday = new Date(kstDate);
-                yesterday.setDate(yesterday.getDate() - 1);
-                const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-                if (user.last_checkin === yesterdayStr) {
-                    newStreak = (user.streak || 0) + 1;
-                }
-            }
-
-            // 상점 인플레이션 방지를 위해 대리 출근 시 토큰 추가 지급은 안 함 (기존 보유량 유지)
-            const currentTokens = user ? (user.tokens ?? 200) : 200;
-            const currentCards = user ? (user.protection_cards ?? 0) : 0;
-
-            await supabase.from('attendance').upsert({
-                user_id: JAEWON_ID,
-                username: JAEWON_NAME,
-                last_checkin: today,
-                streak: newStreak,
-                tokens: currentTokens,
-                protection_cards: currentCards
-            }, { onConflict: 'user_id' });
-
-            console.log(`✨ [자동완료] 재원이 대리 출근 처리 성공! 현재 연속 ${newStreak}일째.`);
-
         } catch (err) {
             console.error("❌ 재원이 대리 출근 스케줄러 작동 실패:", err);
         }
@@ -158,6 +162,23 @@ client.on('messageCreate', async (message) => {
     const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
     const today = kstDate.toISOString().split('T')[0];
     const currentHour = kstDate.getUTCHours();
+
+    // 🧪 재원이 대리 출근 수동 테스트 명령어
+    if (message.content === "!재원") {
+        try {
+            await message.channel.sendTyping(); // 봇이 입력 중인 상태 표시
+            const result = await runJaewonAttendance();
+            
+            if (result.success) {
+                return message.reply(`🎯 **[테스트 완료]** 재원이 대리 출근 처리에 성공했습니다!\n🔥 현재 연속 **${result.streak}일째** 출근 중으로 갱신되었습니다.`);
+            } else {
+                return message.reply(`ℹ️ **[테스트 알림]** 재원이는 ${result.reason} (현재 스트릭: \`${result.streak}일\`)`);
+            }
+        } catch (err) {
+            console.error(err);
+            return message.reply("❌ **[테스트 실패]** 재원이 DB 처리 중 오류가 발생했습니다. 로그를 확인하세요.");
+        }
+    }
 
     // 듀오링고 테스트 로직
     if (message.content === "듀오링고") {
