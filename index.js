@@ -26,6 +26,7 @@ function getRemindMessage(hour) {
     return null;
 }
 
+// [정상 전반부] 정각 알림 스케줄러 등록
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
@@ -53,6 +54,7 @@ client.once('ready', () => {
     });
 });
 
+// [정상 후반부] 메시지 수신 시 처리 로직 (여기서 다 끝내야 함)
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
@@ -62,75 +64,23 @@ client.on('messageCreate', async (message) => {
     const today = kstDate.toISOString().split('T')[0];
     const currentHour = kstDate.getUTCHours();
 
-    // 듀오링고 테스트 로직 (윤호가 요청한 대로 분리)
+    // 듀오링고 테스트 로직
     if (message.content === "듀오링고") {
         const testMsg = getRemindMessage(currentHour);
         const finalMsg = testMsg ? testMsg : `현재 한국 시간 ${currentHour}시입니다. (정기 알림 대기 중)`;
 
         try {
-            // 1. 개인 DM으로는 시간에 맞는 멘트를 보냄
             await message.author.send(`🧪 **[테스트 알림]**\n🔔 <@${userId}>님! ${finalMsg}`);
-            
-            // 2. 채널 답장으로는 깔끔하게 성공 메시지만 보냄
             return message.reply("성공! 개인 DM을 확인해보세요. 📩");
         } catch (err) {
             return message.reply("DM 전송에 실패했습니다. 설정을 확인해 보세요!");
         }
     }
 
-    if (message.content !== "출근" && message.content !== "근출" && message.content !== "출" && message.content !== "근" && message.content !== "出勤" && message.content !== "ㅊㄱ" && message.content !== "출첵" && message.content !== "출석" && message.content !== "attend" && message.content !== "근." && message.content !== "출." && message.content !== "출 " && message.content !== "근 " && message.content !== "출군" && message.content !== "앙" && message.content !== "아잉" && message.content !== "웅" && message.content !== "출근해떠염"&& message.content !== "여자" && message.content !== "ㅊㅊ" && message.content !== "시기다른래퍼들의반대편을바라보던래퍼들의배포")
-
-    cron.schedule('0 * * * *', async () => {
-        const now = new Date();
-        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const today = kstDate.toISOString().split('T')[0];
-        const currentHour = kstDate.getUTCHours();
-
-        const messageText = getRemindMessage(currentHour);
-        
-        if (messageText) {
-            const { data: allUsers } = await supabase.from('attendance').select('*');
-            if (allUsers) {
-                for (const user of allUsers) {
-                    if (user.last_checkin !== today) {
-                        try {
-                            const discordUser = await client.users.fetch(user.user_id);
-                            await discordUser.send(`🔔 <@${user.user_id}>님! ${messageText}`);
-                        } catch (err) { console.error(`${user.username} DM 전송 실패`); }
-                    }
-                }
-            }
-        }
-    });
-});
-
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
-    const userId = message.author.id;
-    const now = new Date();
-    const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-    const today = kstDate.toISOString().split('T')[0];
-    const currentHour = kstDate.getUTCHours();
-
-    // 듀오링고 테스트 로직 (윤호가 요청한 대로 분리)
-    if (message.content === "듀오링고") {
-        const testMsg = getRemindMessage(currentHour);
-        const finalMsg = testMsg ? testMsg : `현재 한국 시간 ${currentHour}시입니다. (정기 알림 대기 중)`;
-
-        try {
-            // 1. 개인 DM으로는 시간에 맞는 멘트를 보냄
-            await message.author.send(`🧪 **[테스트 알림]**\n🔔 <@${userId}>님! ${finalMsg}`);
-            
-            // 2. 채널 답장으로는 깔끔하게 성공 메시지만 보냄
-            return message.reply("성공! 개인 DM을 확인해보세요. 📩");
-        } catch (err) {
-            return message.reply("DM 전송에 실패했습니다. 설정을 확인해 보세요!");
-        }
-    }
-
+    // 네가 직접 길게 수정한 출근 단어 예외 처리 한 줄 (그대로 유지)
     if (message.content !== "출근" && message.content !== "근출" && message.content !== "출" && message.content !== "근" && message.content !== "出勤" && message.content !== "ㅊㄱ" && message.content !== "출첵" && message.content !== "출석" && message.content !== "attend" && message.content !== "근." && message.content !== "출." && message.content !== "출 " && message.content !== "근 " && message.content !== "출군" && message.content !== "앙" && message.content !== "아잉" && message.content !== "웅" && message.content !== "출근해떠염"&& message.content !== "여자" && message.content !== "ㅊㅊ" && message.content !== "시기다른래퍼들의반대편을바라보던래퍼들의배포") return;
 
+    // 새벽 출근 제한
     if (currentHour >= 0 && currentHour < 4) {
         return message.reply("🚫 **지금은 출근 금지 시간입니다!**\n상쾌한 아침 공기를 마시며 다시 와주세요! 😴");
     }
