@@ -29,6 +29,63 @@ function getRemindMessage(hour) {
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
+    // 🛡️ 재원이 대리 출근 스케줄러 (매일 밤 9시 정각에 자동 출근 도장)
+    cron.schedule('0 21 * * *', async () => {
+        const now = new Date();
+        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+        const today = kstDate.toISOString().split('T')[0];
+        
+        // 🎯 분석 완료된 재원이의 실제 디스코드 ID
+        const JAEWON_ID = "1152202483666538516";
+        const JAEWON_NAME = "smphur08";
+
+        try {
+            const { data: user, error: selectError } = await supabase
+                .from('attendance')
+                .select('*')
+                .eq('user_id', JAEWON_ID)
+                .maybeSingle();
+
+            if (selectError) throw selectError;
+
+            // 이미 오늘 출근했거나 대리 출근이 찍혔다면 중복 방지
+            if (user && user.last_checkin === today) {
+                console.log(`[재원봇] 재원이는 이미 오늘 출근 처리가 되어 있습니다.`);
+                return;
+            }
+
+            // 연속 출근 일수(Streak) 보존 계산
+            let newStreak = 1;
+            if (user && user.last_checkin) {
+                const yesterday = new Date(kstDate);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+                if (user.last_checkin === yesterdayStr) {
+                    newStreak = (user.streak || 0) + 1;
+                }
+            }
+
+            // 상점 인플레이션 방지를 위해 대리 출근 시 토큰 추가 지급은 안 함 (기존 보유량 유지)
+            const currentTokens = user ? (user.tokens ?? 200) : 200;
+            const currentCards = user ? (user.protection_cards ?? 0) : 0;
+
+            await supabase.from('attendance').upsert({
+                user_id: JAEWON_ID,
+                username: JAEWON_NAME,
+                last_checkin: today,
+                streak: newStreak,
+                tokens: currentTokens,
+                protection_cards: currentCards
+            }, { onConflict: 'user_id' });
+
+            console.log(`✨ [자동완료] 재원이 대리 출근 처리 성공! 현재 연속 ${newStreak}일째.`);
+
+        } catch (err) {
+            console.error("❌ 재원이 대리 출근 스케줄러 작동 실패:", err);
+        }
+    });
+
     // 정각 알림 스케줄러
     cron.schedule('0 * * * *', async () => {
         const now = new Date();
@@ -170,7 +227,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 🚨 [새로 추가] 보호권 환불 로직 (!환불)
+    // 보호권 환불 로직 (!환불)
     if (message.content === "!환불") {
         try {
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
@@ -184,7 +241,6 @@ client.on('messageCreate', async (message) => {
                 return message.reply(`❌ 환불할 **출근 횟수 보호권**이 없습니다!`);
             }
 
-            // 20% 떼고 80토큰만 돌려줌
             currentTokens += 80;
             currentCards -= 1;
 
@@ -204,7 +260,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 네가 직접 수정한 출근 단어 예외 처리 한 줄
+    // 출근 단어 예외 처리
     if (message.content !== "출근" && message.content !== "근출" && message.content !== "출" && message.content !== "근" && message.content !== "出勤" && message.content !== "ㅊㄱ" && message.content !== "출첵" && message.content !== "출석" && message.content !== "attend" && message.content !== "근." && message.content !== "출." && message.content !== "출 " && message.content !== "근 " && message.content !== "출군" && message.content !== "앙" && message.content !== "아잉" && message.content !== "웅" && message.content !== "출근해떠염"&& message.content !== "여자" && message.content !== "ㅊㅊ" && message.content !== "시기다른래퍼들의반대편을바라보던래퍼들의배포") return;
 
     if (currentHour >= 0 && currentHour < 4) {
