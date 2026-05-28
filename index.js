@@ -132,14 +132,14 @@ client.on('messageCreate', async (message) => {
                                 `📦 **판매 상품**\n` +
                                 `└ 🛡️ **출근 횟수 보호권** | 가격: \`100 토큰\`\n` +
                                 `   *하루 결근 시 자동으로 사용되어 연속 출근 기록을 지켜줍니다.*\n\n` +
-                                `👉 구매하려면 \`!구매 보호권\` 을 입력하세요!`);
+                                `👉 구매하려면 \`!구매\` 을 입력하세요!`);
         } catch (err) {
             return message.reply("상점을 불러오는 중 오류가 발생했습니다.");
         }
     }
 
     // 🚨 3. 보호권 구매 로직 (!구매 보호권)
-    if (message.content === "!구매 보호권") {
+    if (message.content === "!구매") {
         try {
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
             
