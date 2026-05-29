@@ -122,7 +122,7 @@ client.once('ready', () => {
             console.error("❌ 재원이 대리 출근 스케줄러 작동 실패:", err);
         }
     }, {
-        timezone: "Asia/Seoul" // 👈 서버 국가 상관없이 한국 시간 기준으로 작동하도록 고정!
+        timezone: "Asia/Seoul"
     });
 
     // 정각 알림 스케줄러 (한국 시간 매 정각)
@@ -245,7 +245,7 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // 보호권 구매 로직 (!구매 보호권)
+    // 보호권 구매 로직 (!구매)
     if (message.content === "!구매") {
         try {
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
@@ -311,6 +311,211 @@ client.on('messageCreate', async (message) => {
         }
     }
 
+    // ==========================================
+    // 🎰 추가 기능 1: 슬롯머신 (!도박 / !슬롯) 
+    // ==========================================
+    if (message.content === '!도박' || message.content === '!슬롯') {
+        try {
+            const slotPrice = 5; // 판돈 5토큰 설정 고정
+
+            const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
+            let currentTokens = user ? (user.tokens ?? 200) : 200;
+            let currentCards = user ? (user.protection_cards ?? 0) : 0;
+            let currentStreak = user ? (user.streak ?? 0) : 0;
+            let lastCheckin = user ? user.last_checkin : null;
+
+            if (currentTokens < slotPrice) {
+                return message.reply(`❌ 토큰이 부족합니다! 슬롯머신은 **${slotPrice} 토큰**이 필요합니다. (현재 잔액: ${currentTokens} 토큰)`);
+            }
+
+            // 정확히 7가지 기호 배열 구성
+            const emojis = ['7️⃣', '💎', '🍀', '🍇', '🍊', '🍒', '🔔'];
+            const slot1 = emojis[Math.floor(Math.random() * emojis.length)];
+            const slot2 = emojis[Math.floor(Math.random() * emojis.length)];
+            const slot3 = emojis[Math.floor(Math.random() * emojis.length)];
+
+            let prize = 0;
+            let resultText = '';
+
+            // 1단계: 3개 일치 (최상위 잭팟) 판정
+            if (slot1 === slot2 && slot2 === slot3) {
+                if (slot1 === '7️⃣') {
+                    prize = 1000; // 777 잭팟: 1000토큰
+                    resultText = '🔥 **[신화] 777 대박 잭팟!!! 대륙이 진동합니다! (1000토큰 획득)** 🔥';
+                } else if (slot1 === '💎') {
+                    prize = 600; // 다이아 잭팟: 600토큰
+                    resultText = '💎 **[전설] 다이아몬드 잭팟!!! 서버의 지배자! (600토큰 획득)** 💎';
+                } else if (slot1 === '🍀') {
+                    prize = 300; // 네잎클로버 잭팟: 300토큰
+                    resultText = '🍀 **[에픽] 네잎클로버 잭팟!!! 신이 내린 행운! (300토큰 획득)** 🍀';
+                } else {
+                    prize = 75; // 나머지 일반 기호 3개 일치: 75토큰
+                    resultText = `🎰 **[일반] 잭팟! [ ${slot1} ] 3개가 일치합니다! (75토큰 획득)** 🎰`;
+                }
+            } 
+            // 2단계: 특수 변칙 조건 1 - 네잎클로버가 양 옆에만 있는 경우 [ 🍀 | !🍀 | 🍀 ]
+            else if (slot1 === '🍀' && slot3 === '🍀' && slot2 !== '🍀') {
+                prize = 150; // 양 옆 네잎클로버: 150토큰
+                resultText = '🍀✨ **[시크릿] 클로버 더블 윙! 양 옆에 대박 행운이 깃듭니다! (150토큰 획득)** ✨🍀';
+            }
+            // 3단계: 특수 변칙 조건 2 - 다이아몬드가 2개 일치하는 경우
+            else if (
+                (slot1 === '💎' && slot2 === '💎') || 
+                (slot2 === '💎' && slot3 === '💎') || 
+                (slot1 === '💎' && slot3 === '💎')
+            ) {
+                prize = 100; // 다이아 2개 일치: 100토큰
+                resultText = '💎✨ **[더블 💎] 다이아몬드가 2개! 엄청난 자산 가치입니다! (100토큰 획득)** ✨💎';
+            }
+            // 4단계: 일반 2개 일치 판정 (위의 특수 다이아/클로버 조건에 안 걸린 일반 기호들)
+            else if (slot1 === slot2 || slot2 === slot3 || slot1 === slot3) {
+                prize = 15; // 일반 2개 일치: 15토큰 유지
+                resultText = '🎉 **축하합니다! 그림 2개가 일치합니다! (15토큰 획득)** 🎉';
+            } 
+            // 5단계: 낙첨
+            else {
+                prize = 0;
+                resultText = '😭 **아쉽게도 낙첨되었습니다. 다음 기회에!** 😭';
+            }
+
+            const finalTokens = currentTokens - slotPrice + prize;
+
+            await supabase.from('attendance').upsert({
+                user_id: userId,
+                username: message.author.username,
+                tokens: finalTokens,
+                protection_cards: currentCards,
+                streak: currentStreak,
+                last_checkin: lastCheckin
+            }, { onConflict: 'user_id' });
+
+            return message.reply(
+                `🎰 **SLOT MACHINE** 🎰\n` +
+                `[ ${slot1} | ${slot2} | ${slot3} ]\n` +
+                `-------------------------\n` +
+                `${resultText}\n` +
+                `💰 **정산:** 상금 [ +${prize} 토큰 ] / 판돈 [ -${slotPrice} 토큰 ]\n` +
+                `💳 **현재 잔액:** ${finalTokens} 토큰`
+            );
+        } catch (err) {
+            console.error(err);
+            return message.reply("슬롯머신 구동 중 시스템 오류가 발생했습니다.");
+        }
+    }
+
+    // ==========================================
+    // 🎫 추가 기능 2: 로또 (!로또 수동/자동)
+    // ==========================================
+    if (message.content.startsWith('!로또')) {
+        try {
+            const args = message.content.split(' ').slice(1);
+            const isAuto = (args[0] === '자동' || args.length === 0);
+            const lottoPrice = isAuto ? 25 : 20; // 자동 25, 수동 20토큰 판돈 차등화 적용
+
+            const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
+            let currentTokens = user ? (user.tokens ?? 200) : 200;
+            let currentCards = user ? (user.protection_cards ?? 0) : 0;
+            let currentStreak = user ? (user.streak ?? 0) : 0;
+            let lastCheckin = user ? user.last_checkin : null;
+
+            if (currentTokens < lottoPrice) {
+                return message.reply(`❌ 토큰이 부족합니다! 이번 판은 **${lottoPrice} 토큰**이 필요합니다. (현재 잔액: ${currentTokens} 토큰)`);
+            }
+
+            let userNumbers = [];
+
+            if (isAuto) {
+                while (userNumbers.length < 6) {
+                    let num = Math.floor(Math.random() * 45) + 1;
+                    if (!userNumbers.includes(num)) userNumbers.push(num);
+                }
+                userNumbers.sort((a, b) => a - b);
+            } else {
+                if (args.length !== 6) {
+                    return message.reply(`❌ 숫자는 정확히 6개를 띄어쓰기로 입력해 주세요!\n💡 예시: \`!로또 3 12 24 33 39 45\` (20토큰) 또는 \`!로또 자동\` (25토큰)`);
+                }
+                
+                userNumbers = args.map(Number);
+                const isValid = userNumbers.every(num => num >= 1 && num <= 45 && !isNaN(num));
+                const hasDuplicate = new Set(userNumbers).size !== 6;
+
+                if (!isValid || hasDuplicate) {
+                    return message.reply('❌ 1부터 45 사이의 중복 없는 올바른 숫자 6개를 입력해 주세요!');
+                }
+                userNumbers.sort((a, b) => a - b);
+            }
+
+            // 봇 당첨 번호 추첨 (6개 + 보너스 1개)
+            let winningNumbers = [];
+            while (winningNumbers.length < 6) {
+                let num = Math.floor(Math.random() * 45) + 1;
+                if (!winningNumbers.includes(num)) winningNumbers.push(num);
+            }
+            winningNumbers.sort((a, b) => a - b);
+
+            let bonusNumber;
+            while (true) {
+                let num = Math.floor(Math.random() * 45) + 1;
+                if (!winningNumbers.includes(num)) {
+                    bonusNumber = num;
+                    break;
+                }
+            }
+
+            const matchedCount = userNumbers.filter(num => winningNumbers.includes(num)).length;
+            const isBonusMatched = userNumbers.includes(bonusNumber);
+
+            let resultMessage = '';
+            let prize = 0;
+
+            if (matchedCount === 6) {
+                resultMessage = '🎉 1등 당첨!!! 대박 신화의 주인공이 되셨습니다! 🎉';
+                prize = 5000; 
+            } else if (matchedCount === 5 && isBonusMatched) {
+                resultMessage = '🥈 2등 당첨!! 보너스 번호가 신의 한 수였네요! 🥈';
+                prize = 1000; 
+            } else if (matchedCount === 5) {
+                resultMessage = '🥉 3등 당첨! 엄청난 행운입니다! 🥉';
+                prize = 500; 
+            } else if (matchedCount === 4) {
+                resultMessage = '🏅 4등 당첨! 피자 한 판 가격! 🏅';
+                prize = 100; 
+            } else if (matchedCount === 3) {
+                resultMessage = '◽ 5등 당첨! 본전 치기 성공! ◽';
+                prize = 25; 
+            } else {
+                resultMessage = '😭 낙첨되었습니다... 다음 기회에! 😭';
+                prize = 0;
+            }
+
+            const finalTokens = currentTokens - lottoPrice + prize;
+
+            await supabase.from('attendance').upsert({
+                user_id: userId,
+                username: message.author.username,
+                tokens: finalTokens,
+                protection_cards: currentCards,
+                streak: currentStreak,
+                last_checkin: lastCheckin
+            }, { onConflict: 'user_id' });
+
+            const modeText = isAuto ? '🎲 자동 발급 (25토큰)' : '✍️ 수동 마킹 (20토큰)';
+            return message.reply(
+                `🎫 **인생역전 로또 결과 고지서 (${modeText})** 🎫\n` +
+                `• 선택한 번호: [ ${userNumbers.join(', ')} ]\n` +
+                `• 이번주 당첨 번호: [ ${winningNumbers.join(', ')} ] + 보너스 [ ${bonusNumber} ]\n` +
+                `-----------------------------------------\n` +
+                `🎯 **맞춘 개수:** ${matchedCount}개 ${isBonusMatched ? '(보너스 번호 일치!)' : ''}\n` +
+                `📢 **결과:** ${resultMessage}\n` +
+                `💰 **정산:** 상금 [ +${prize} 토큰 ] / 판돈 [ -${lottoPrice} 토큰 ]\n` +
+                `💳 **현재 잔액:** ${finalTokens} 토큰`
+            );
+        } catch (err) {
+            console.error(err);
+            return message.reply("로또 추첨 시스템 구동 중 에러가 발생했습니다.");
+        }
+    }
+
     // 출근 단어 예외 처리
     if (message.content !== "출근" && message.content !== "근출" && message.content !== "출" && message.content !== "근" && message.content !== "出勤" && message.content !== "ㅊㄱ" && message.content !== "출첵" && message.content !== "출석" && message.content !== "attend" && message.content !== "근." && message.content !== "출." && message.content !== "출 " && message.content !== "근 " && message.content !== "출군" && message.content !== "앙" && message.content !== "아잉" && message.content !== "웅" && message.content !== "출근해떠염"&& message.content !== "여자" && message.content !== "ㅊㅊ" && message.content !== "시기다른래퍼들의반대편을바라보던래퍼들의배포") return;
 
@@ -361,7 +566,16 @@ client.on('messageCreate', async (message) => {
 
         const { error: upsertError } = await supabase
             .from('attendance')
-            .upsert({
+            .update({
+                last_checkin: today,
+                streak: newStreak,
+                tokens: totalTokens
+            })
+            .eq('user_id', userId);
+
+        // 기존에 데이터가 전혀 없던 새 유저라면 upsert 처리
+        if (!user) {
+            await supabase.from('attendance').upsert({
                 user_id: userId,
                 username: message.author.username,
                 last_checkin: today,
@@ -369,8 +583,8 @@ client.on('messageCreate', async (message) => {
                 tokens: totalTokens,
                 protection_cards: currentCards
             }, { onConflict: 'user_id' });
+        }
 
-        if (upsertError) throw upsertError;
         message.reply(`✅ **출근 완료!** 현재 **${newStreak}일** 연속 출근 중! 🔥\n💰 \`${earnedTokens} 토큰\` 획득! (총 보유: \`${totalTokens} 토큰\`)`);
 
     } catch (err) {
