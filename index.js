@@ -13,6 +13,28 @@ const client = new Client({
     ]
 });
 
+// 🕒 한국 시간(KST)을 안전하게 구하는 헬퍼 함수
+function getKSTInfo() {
+    const now = new Date();
+    // 한국 시간 기준으로 날짜 문자열(YYYY-MM-DD) 추출
+    const todayStr = now.toLocaleDateString('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+    }).replace(/\. /g, '-').replace('.', ''); // "2026-05-29" 형태 변환
+
+    // 한국 시간 기준으로 시(Hour) 추출
+    const hourStr = now.toLocaleTimeString('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        hour: '2-digit',
+        hour12: false
+    });
+    const currentHour = parseInt(hourStr, 10);
+
+    return { today: todayStr, currentHour, nativeDate: now };
+}
+
 function getRemindMessage(hour) {
     if (hour === 11) return "좋은 아침이에요! 오늘도 잊지 말고 출근 도장 꾹 눌러주세요? ✨";
     if (hour === 14) return "벌써 오후 2시에요! 설마 오늘 출근 까먹으신 건 아니죠...? 얼른 오세요! 🤨";
@@ -26,11 +48,9 @@ function getRemindMessage(hour) {
     return null;
 }
 
-// 🛡️ 재원이 대리 출근 공통 핵심 로직 (10토큰 차감 기능 추가)
+// 🛡️ 재원이 대리 출근 공통 핵심 로직
 async function runJaewonAttendance() {
-    const now = new Date();
-    const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-    const today = kstDate.toISOString().split('T')[0];
+    const { today } = getKSTInfo();
     
     const JAEWON_ID = "1152202483666538516";
     const JAEWON_NAME = "smphur08";
@@ -43,23 +63,27 @@ async function runJaewonAttendance() {
 
     if (selectError) throw selectError;
 
-    // 이미 오늘 직접 출근했거나 대리 출근이 완료된 상태라면 스킵
     if (user && user.last_checkin === today) {
         return { success: false, status: "ALREADY", reason: "이미 오늘 출근 처리가 되어 있습니다.", streak: user.streak };
     }
 
-    // 💸 대리 출근용 토큰 검사 및 차감 (기본값 200토큰 설정)
     let currentTokens = user ? (user.tokens ?? 200) : 200;
     if (currentTokens < 10) {
         return { success: false, status: "NO_TOKEN", reason: "보유 토큰이 부족합니다. (대리 출근에는 10 토큰이 필요합니다.)", streak: user ? user.streak : 0 };
     }
 
-    // 10토큰 감소
     currentTokens -= 10;
 
     let newStreak = 1;
     if (user && user.last_checkin) {
-        const yesterday = new Date(kstDate);
+        // 어제 날짜 구하기 (한국시간 기준 날짜 계산)
+        const formatter = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' });
+        const parts = formatter.formatToParts(new Date());
+        const y = parts.find(p => p.type === 'year').value;
+        const m = parts.find(p => p.type === 'month').value;
+        const d = parts.find(p => p.type === 'day').value;
+        
+        const yesterday = new Date(`${y}-${m}-${d}T12:00:00+09:00`);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
 
@@ -85,31 +109,25 @@ async function runJaewonAttendance() {
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
-    // ⏰ 재원이 자동 대리 출근 스케줄러 (매일 밤 11시 정각에 자동 출근 도장)
+    // ⏰ 재원이 자동 대리 출근 스케줄러 (한국 시간 밤 11시 정각 고정)
     cron.schedule('0 23 * * *', async () => {
         try {
             const result = await runJaewonAttendance();
             if (result.success) {
-                console.log(`✨ [자동완료] 23시까지 재원이 출근 기록이 없어 대리 출근 처리했습니다. (연속 ${result.streak}일째 | 남은 토큰: ${result.remainingTokens})`);
+                console.log(`✨ [자동완료] 한국 시간 23시 대리 출근 성공! (연속 ${result.streak}일째 | 남은 토큰: ${result.remainingTokens})`);
             } else {
-                if (result.status === "ALREADY") {
-                    console.log(`[재원봇] 23시 대리 출근 스케줄러 스킵: 재원이가 이미 오늘 출근을 완료했습니다.`);
-                } else if (result.status === "NO_TOKEN") {
-                    console.log(`[재원봇] 23시 대리 출근 실패: 재원이의 토큰이 부족합니다. (${result.reason})`);
-                }
+                console.log(`[재원봇] 23시 대리 출근 스킵: ${result.reason}`);
             }
         } catch (err) {
             console.error("❌ 재원이 대리 출근 스케줄러 작동 실패:", err);
         }
+    }, {
+        timezone: "Asia/Seoul" // 👈 서버 국가 상관없이 한국 시간 기준으로 작동하도록 고정!
     });
 
-    // 정각 알림 스케줄러
+    // 정각 알림 스케줄러 (한국 시간 매 정각)
     cron.schedule('0 * * * *', async () => {
-        const now = new Date();
-        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const today = kstDate.toISOString().split('T')[0];
-        const currentHour = kstDate.getUTCHours();
-
+        const { today, currentHour } = getKSTInfo();
         const messageText = getRemindMessage(currentHour);
         
         if (messageText) {
@@ -125,13 +143,13 @@ client.once('ready', () => {
                 }
             }
         }
+    }, {
+        timezone: "Asia/Seoul"
     });
 
-    // 매일 밤 23시 59분 자동 방어 및 리셋 스케줄러
+    // 매일 밤 23시 59분 자동 방어 및 리셋 스케줄러 (한국 시간 기준)
     cron.schedule('59 23 * * *', async () => {
-        const now = new Date();
-        const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-        const today = kstDate.toISOString().split('T')[0];
+        const { today } = getKSTInfo();
 
         const { data: allUsers } = await supabase.from('attendance').select('*');
         if (!allUsers) return;
@@ -164,6 +182,8 @@ client.once('ready', () => {
                 }
             }
         }
+    }, {
+        timezone: "Asia/Seoul"
     });
 });
 
@@ -171,10 +191,7 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
     const userId = message.author.id;
-    const now = new Date();
-    const kstDate = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-    const today = kstDate.toISOString().split('T')[0];
-    const currentHour = kstDate.getUTCHours();
+    const { today, currentHour } = getKSTInfo();
 
     // 🧪 재원이 대리 출근 수동 테스트 명령어
     if (message.content === "!재원") {
@@ -323,7 +340,14 @@ client.on('messageCreate', async (message) => {
 
         let newStreak = 1;
         if (user && user.last_checkin) {
-            const yesterday = new Date(kstDate);
+            // 어제 날짜 구하기
+            const formatter = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' });
+            const parts = formatter.formatToParts(new Date());
+            const y = parts.find(p => p.type === 'year').value;
+            const m = parts.find(p => p.type === 'month').value;
+            const d = parts.find(p => p.type === 'day').value;
+            
+            const yesterday = new Date(`${y}-${m}-${d}T12:00:00+09:00`);
             yesterday.setDate(yesterday.getDate() - 1);
             const yesterdayStr = yesterday.toISOString().split('T')[0];
 
