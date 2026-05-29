@@ -16,15 +16,13 @@ const client = new Client({
 // 🕒 한국 시간(KST)을 안전하게 구하는 헬퍼 함수
 function getKSTInfo() {
     const now = new Date();
-    // 한국 시간 기준으로 날짜 문자열(YYYY-MM-DD) 추출
     const todayStr = now.toLocaleDateString('ko-KR', {
         timeZone: 'Asia/Seoul',
         year: 'numeric',
         month: '2-digit',
         day: '2-digit'
-    }).replace(/\. /g, '-').replace('.', ''); // "2026-05-29" 형태 변환
+    }).replace(/\. /g, '-').replace('.', '');
 
-    // 한국 시간 기준으로 시(Hour) 추출
     const hourStr = now.toLocaleTimeString('ko-KR', {
         timeZone: 'Asia/Seoul',
         hour: '2-digit',
@@ -76,7 +74,6 @@ async function runJaewonAttendance() {
 
     let newStreak = 1;
     if (user && user.last_checkin) {
-        // 어제 날짜 구하기 (한국시간 기준 날짜 계산)
         const formatter = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' });
         const parts = formatter.formatToParts(new Date());
         const y = parts.find(p => p.type === 'year').value;
@@ -316,7 +313,7 @@ client.on('messageCreate', async (message) => {
     // ==========================================
     if (message.content === '!도박' || message.content === '!슬롯') {
         try {
-            const slotPrice = 5; // 판돈 5토큰 설정 고정
+            const slotPrice = 25; // 판돈 25토큰 고정
 
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
             let currentTokens = user ? (user.tokens ?? 200) : 200;
@@ -328,57 +325,95 @@ client.on('messageCreate', async (message) => {
                 return message.reply(`❌ 토큰이 부족합니다! 슬롯머신은 **${slotPrice} 토큰**이 필요합니다. (현재 잔액: ${currentTokens} 토큰)`);
             }
 
-            // 정확히 7가지 기호 배열 구성
+            // 🎯 기본 7가지 기호 배열
             const emojis = ['7️⃣', '💎', '🍀', '🍇', '🍊', '🍒', '🔔'];
-            const slot1 = emojis[Math.floor(Math.random() * emojis.length)];
-            const slot2 = emojis[Math.floor(Math.random() * emojis.length)];
-            const slot3 = emojis[Math.floor(Math.random() * emojis.length)];
+            
+            // 😈 [확률 분기 재설계] 6은 0.5% 독립 확률, 4는 4.0% 독립 확률 가로채기 적용
+            const generateSlotSlot = () => {
+                const rand = Math.random();
+                if (rand < 0.005) return '6️⃣';      // 0.5% 확률로 6 지정
+                if (rand < 0.045) return '4️⃣';      // 그 뒤 4.0% 확률로 4 지정 (0.005 ~ 0.045 구간)
+                return emojis[Math.floor(Math.random() * emojis.length)];
+            };
+
+            const slot1 = generateSlotSlot();
+            const slot2 = generateSlotSlot();
+            const slot3 = generateSlotSlot();
 
             let prize = 0;
+            let curseType = null; 
             let resultText = '';
 
-            // 1단계: 3개 일치 (최상위 잭팟) 판정
-            if (slot1 === slot2 && slot2 === slot3) {
+            // 1단계: 💀 6️⃣6️⃣6️⃣ 대재앙 판정 (800만분의 1)
+            if (slot1 === '6️⃣' && slot2 === '6️⃣' && slot3 === '6️⃣') {
+                curseType = '666';
+                resultText = '💀☠️ **[대재앙] 6 6 6 지옥의 문이 열렸습니다!!! 영혼과 함께 1500토큰이 증발합니다!!!** ☠️💀';
+            }
+            // 2단계: 👁️ 4️⃣4️⃣4️⃣ 죽음의 저주 판정 (15,625분의 1 - 콘셉트 매칭형 저주)
+            else if (slot1 === '4️⃣' && slot2 === '4️⃣' && slot3 === '4️⃣') {
+                curseType = '444';
+                resultText = '👁️🚨 **[경고] 4 4 4 사(死)의 저주가 내렸습니다! 불길한 기운과 함께 444.4토큰이 소멸합니다!** 🚨👁️';
+            }
+            // 3단계: 기존 3개 일치 (최상위 잭팟) 판정
+            else if (slot1 === slot2 && slot2 === slot3) {
                 if (slot1 === '7️⃣') {
-                    prize = 1000; // 777 잭팟: 1000토큰
+                    prize = 1000;
                     resultText = '🔥 **[신화] 777 대박 잭팟!!! 대륙이 진동합니다! (1000토큰 획득)** 🔥';
                 } else if (slot1 === '💎') {
-                    prize = 600; // 다이아 잭팟: 600토큰
+                    prize = 600;
                     resultText = '💎 **[전설] 다이아몬드 잭팟!!! 서버의 지배자! (600토큰 획득)** 💎';
                 } else if (slot1 === '🍀') {
-                    prize = 300; // 네잎클로버 잭팟: 300토큰
+                    prize = 300;
                     resultText = '🍀 **[에픽] 네잎클로버 잭팟!!! 신이 내린 행운! (300토큰 획득)** 🍀';
                 } else {
-                    prize = 75; // 나머지 일반 기호 3개 일치: 75토큰
+                    prize = 75;
                     resultText = `🎰 **[일반] 잭팟! [ ${slot1} ] 3개가 일치합니다! (75토큰 획득)** 🎰`;
                 }
             } 
-            // 2단계: 특수 변칙 조건 1 - 네잎클로버가 양 옆에만 있는 경우 [ 🍀 | !🍀 | 🍀 ]
+            // 4단계: 특수 변칙 조건 1 - 네잎클로버가 양 옆에만 있는 경우 [ 🍀 | !🍀 | 🍀 ]
             else if (slot1 === '🍀' && slot3 === '🍀' && slot2 !== '🍀') {
-                prize = 150; // 양 옆 네잎클로버: 150토큰
+                prize = 150;
                 resultText = '🍀✨ **[시크릿] 클로버 더블 윙! 양 옆에 대박 행운이 깃듭니다! (150토큰 획득)** ✨🍀';
             }
-            // 3단계: 특수 변칙 조건 2 - 다이아몬드가 2개 일치하는 경우
+            // 5단계: 특수 변칙 조건 2 - 다이아몬드가 2개 일치하는 경우
             else if (
                 (slot1 === '💎' && slot2 === '💎') || 
                 (slot2 === '💎' && slot3 === '💎') || 
                 (slot1 === '💎' && slot3 === '💎')
             ) {
-                prize = 100; // 다이아 2개 일치: 100토큰
+                prize = 100;
                 resultText = '💎✨ **[더블 💎] 다이아몬드가 2개! 엄청난 자산 가치입니다! (100토큰 획득)** ✨💎';
             }
-            // 4단계: 일반 2개 일치 판정 (위의 특수 다이아/클로버 조건에 안 걸린 일반 기호들)
-            else if (slot1 === slot2 || slot2 === slot3 || slot1 === slot3) {
-                prize = 15; // 일반 2개 일치: 15토큰 유지
+            // 6단계: 일반 2개 일치 판정 (저주 기호 6 또는 4가 하나라도 섞인 경우 당첨 예외 처리)
+            else if ((slot1 === slot2 || slot2 === slot3 || slot1 === slot3) && 
+                     slot1 !== '6️⃣' && slot2 !== '6️⃣' && slot3 !== '6️⃣' &&
+                     slot1 !== '4️⃣' && slot2 !== '4️⃣' && slot3 !== '4️⃣') {
+                prize = 15;
                 resultText = '🎉 **축하합니다! 그림 2개가 일치합니다! (15토큰 획득)** 🎉';
             } 
-            // 5단계: 낙첨
+            // 7단계: 낙첨
             else {
                 prize = 0;
                 resultText = '😭 **아쉽게도 낙첨되었습니다. 다음 기회에!** 😭';
             }
 
-            const finalTokens = currentTokens - slotPrice + prize;
+            // 💸 최종 토큰 정산 계산 (소수점 자산 정상 연산을 위해 Number 처리 및 고정)
+            let finalTokens = currentTokens - slotPrice + prize;
+            let displayPrizeText = `[ +${prize} 토큰 ]`;
+
+            // 😈 저주 종류에 따른 차감 및 파산 방어선 처리
+            if (curseType === '666') {
+                finalTokens = currentTokens - slotPrice - 1500;
+                displayPrizeText = `[ -1500 토큰 (666 지옥의 낙인) ]`;
+            } else if (curseType === '444') {
+                finalTokens = currentTokens - slotPrice - 444.4;
+                displayPrizeText = `[ -444.4 토큰 (444 사의 저주) ]`;
+            }
+
+            if (finalTokens < 0) finalTokens = 0; // 마이너스 자산 방지
+            
+            // 소수점 둘째 자리까지 깔끔하게 반올림 처리해서 데이터 무결성 확보
+            finalTokens = Math.round(finalTokens * 100) / 100;
 
             await supabase.from('attendance').upsert({
                 user_id: userId,
@@ -394,7 +429,7 @@ client.on('messageCreate', async (message) => {
                 `[ ${slot1} | ${slot2} | ${slot3} ]\n` +
                 `-------------------------\n` +
                 `${resultText}\n` +
-                `💰 **정산:** 상금 [ +${prize} 토큰 ] / 판돈 [ -${slotPrice} 토큰 ]\n` +
+                `💰 **정산:** 상금 ${displayPrizeText} / 판돈 [ -${slotPrice} 토큰 ]\n` +
                 `💳 **현재 잔액:** ${finalTokens} 토큰`
             );
         } catch (err) {
@@ -410,7 +445,7 @@ client.on('messageCreate', async (message) => {
         try {
             const args = message.content.split(' ').slice(1);
             const isAuto = (args[0] === '자동' || args.length === 0);
-            const lottoPrice = isAuto ? 25 : 20; // 자동 25, 수동 20토큰 판돈 차등화 적용
+            const lottoPrice = isAuto ? 55 : 50; 
 
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
             let currentTokens = user ? (user.tokens ?? 200) : 200;
@@ -432,7 +467,7 @@ client.on('messageCreate', async (message) => {
                 userNumbers.sort((a, b) => a - b);
             } else {
                 if (args.length !== 6) {
-                    return message.reply(`❌ 숫자는 정확히 6개를 띄어쓰기로 입력해 주세요!\n💡 예시: \`!로또 3 12 24 33 39 45\` (20토큰) 또는 \`!로또 자동\` (25토큰)`);
+                    return message.reply(`❌ 숫자는 정확히 6개를 띄어쓰기로 입력해 주세요!\n💡 예시: \`!로또 3 12 24 33 39 45\` (50토큰) 또는 \`!로또 자동\` (55토큰)`);
                 }
                 
                 userNumbers = args.map(Number);
@@ -445,7 +480,6 @@ client.on('messageCreate', async (message) => {
                 userNumbers.sort((a, b) => a - b);
             }
 
-            // 봇 당첨 번호 추첨 (6개 + 보너스 1개)
             let winningNumbers = [];
             while (winningNumbers.length < 6) {
                 let num = Math.floor(Math.random() * 45) + 1;
@@ -499,7 +533,7 @@ client.on('messageCreate', async (message) => {
                 last_checkin: lastCheckin
             }, { onConflict: 'user_id' });
 
-            const modeText = isAuto ? '🎲 자동 발급 (25토큰)' : '✍️ 수동 마킹 (20토큰)';
+            const modeText = isAuto ? '🎲 자동 발급 (55토큰)' : '✍️ 수동 마킹 (50토큰)';
             return message.reply(
                 `🎫 **인생역전 로또 결과 고지서 (${modeText})** 🎫\n` +
                 `• 선택한 번호: [ ${userNumbers.join(', ')} ]\n` +
@@ -545,7 +579,6 @@ client.on('messageCreate', async (message) => {
 
         let newStreak = 1;
         if (user && user.last_checkin) {
-            // 어제 날짜 구하기
             const formatter = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' });
             const parts = formatter.formatToParts(new Date());
             const y = parts.find(p => p.type === 'year').value;
@@ -573,7 +606,6 @@ client.on('messageCreate', async (message) => {
             })
             .eq('user_id', userId);
 
-        // 기존에 데이터가 전혀 없던 새 유저라면 upsert 처리
         if (!user) {
             await supabase.from('attendance').upsert({
                 user_id: userId,
