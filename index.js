@@ -102,20 +102,21 @@ async function runJaewonAttendance() {
     return { success: true, streak: newStreak, remainingTokens: currentTokens };
 }
 
-// 😈 상금 정산 및 개인 격리 확률 관리 로직
-async function applySlotWinnings(message, userId, user, netPrize, resultText, slotDisplay, slotPrice, curseType = null) {
+// 😈 [수정] 분리된 판돈과 보상을 적용한 자산 정산 및 개인 격리 확률 관리 로직
+async function applySlotWinnings(message, userId, user, slotPrice, prize, resultText, slotDisplay, curseType = null) {
     let currentP444 = user.p_444 ?? 4.0;
     let currentP666 = user.p_666 ?? 1.0;
 
     let newP444 = currentP444;
     let newP666 = currentP666;
 
+    // 가변 확률 조정
     if (curseType === '444') {
         newP444 = 4.0;
     } else if (curseType === '666') {
         newP666 = 1.0;
     } 
-    else if (netPrize > 0) {
+    else if (prize > slotPrice) { // 판돈보다 높은 상금을 땄을 때 확률 누적
         newP444 = Math.min(currentP444 + 0.4, 99.0);
         newP666 = Math.min(currentP666 + 0.5, 99.0);
     }
@@ -131,7 +132,11 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
         } catch (e) {}
     }
 
-    let finalTokens = (user.tokens ?? 200) + netPrize;
+    // 💰 [핵심 수정] 판돈 차감 후 당첨 보상 지급 프로세스 분리
+    let startTokens = user.tokens ?? 200;
+    let afterBetTokens = startTokens - slotPrice; // 1단계: 판돈 선차감
+    let finalTokens = afterBetTokens + prize;      // 2단계: 당첨 보상 합산 (저주일 경우 마이너스 적용)
+
     if (finalTokens < 0) finalTokens = 0;
     finalTokens = Math.round(finalTokens * 100) / 100;
 
@@ -146,14 +151,16 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
         p_666: newP666
     }, { onConflict: 'user_id' });
 
-    let displayPrizeText = netPrize >= 0 ? `[ +${netPrize} 토큰 ]` : `[ ${netPrize} 토큰 ]`;
+    // 정산 텍스트 포맷 분리 출력
+    let displayPrize = prize >= 0 ? `+${prize} 토큰` : `${prize} 토큰`;
 
     return message.reply(
         `🎰 **SLOT MACHINE** 🎰\n` +
         `${slotDisplay}\n` +
         `-------------------------\n` +
         `${resultText}\n` +
-        `💰 **정산:** 상금 및 변동 ${displayPrizeText} / 판돈 [ -${slotPrice} 토큰 ]\n` +
+        `💸 **판돈 차감:** [ -${slotPrice} 토큰 ]\n` +
+        `🎁 **당첨 보상:** [ ${displayPrize} ]\n` +
         `💳 **현재 잔액:** ${finalTokens} 토큰 (나의 444: ${newP444.toFixed(1)}% | 나의 666: ${newP666.toFixed(1)}%)`
     );
 }
@@ -290,7 +297,7 @@ client.on('messageCreate', async (message) => {
                 streak: user ? user.streak : 0, last_checkin: user ? user.last_checkin : null
             }, { onConflict: 'user_id' });
 
-            return message.reply(`💸 환불 완료! 80 토큰 반환. (현재 보유: 💰 \`${currentTokens + 80}\` | 보유 보호권: 🛡️ \`${currentCards - 1}개\`)`);
+            return message.reply(`💸 환불 완료! 80 토큰 반환. (현재 보유: 💰 \`${currentTokens + 80}\` | 보유 보유권: 🛡️ \`${currentCards - 1}개\`)`);
         } catch (err) { return message.reply("환불 오류."); }
     }
 
@@ -299,7 +306,7 @@ client.on('messageCreate', async (message) => {
             `🎲 **[도박 시스템 안내소]** 🎲\n` +
             `원하는 도박판의 명령어를 입력하세요. (기본 판돈: 슬롯 25토큰 / 로또 수동 50, 자동 55토큰)\n\n` +
             `🎰 **슬롯머신 계열**\n` +
-            `• \`!슬롯3\` : 우리가 원래 하던 클래식 3x1 슬롯머신 (개인 가변 확률 적용)\n` +
+            `• \`!슬롯3\` : 클래식 3x1 슬롯 (페어 50 / 잭팟 500 / 트레져헌터 300 / 더블윙 200 / 푸르티 150 / 넘버 65)\n` +
             `• \`!슬롯53\` : 5열 3행 완벽 격자 대형 도박판\n` +
             `• \`!슬롯25\` : 2열 5행 보드에서 고르는 10칸 뒤집기 스페셜 (입력: \`!1 5 8\`)\n` +
             `• \`!슬롯7\` : 7열 1행 초고속 한 줄 다이렉트 도박판\n\n` +
@@ -350,7 +357,7 @@ client.on('messageCreate', async (message) => {
                 return baseEmojis[Math.floor(Math.random() * baseEmojis.length)];
             };
 
-            // Mode 1: [!슬롯3]
+            // Mode 1: [!슬롯3] - 판돈과 보상 완전히 분리된 정산 메커니즘
             if (command === '!슬롯3') {
                 let row = Array.from({ length: 3 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -359,30 +366,69 @@ client.on('messageCreate', async (message) => {
                 let curseType = null;
                 let resultText = '';
 
+                const fruitsAndBell = ['🍇', '🍊', '🍒', '🔔'];
+                const numbers = ['7️⃣', '4️⃣', '6️⃣'];
+
                 const count6 = row.filter(s => s === '6️⃣').length;
                 const count4 = row.filter(s => s === '4️⃣').length;
+                const uniqueSymbols = new Set(row);
 
-                if (count6 === 3) { curseType = '666'; resultText = '💀 **[3x1 심연 강림] 666 배정! (1500토큰 소멸)** 💀'; }
-                else if (count4 === 3) { curseType = '444'; resultText = '👁️ **[3x1 사선 도래] 444 배정! (444.4토큰 소멸)** 👁️'; }
-                else if (row[0] === row[1] && row[1] === row[2]) {
+                // 1. 최상위 저주 및 3개 일치(트리플) 라인 검증
+                if (count6 === 3) { 
+                    curseType = '666'; 
+                    prize = -1500; // 보상값 자체를 패널티로 부여
+                    resultText = '💀 **[3x1 루시퍼] 심연의 군주가 깨어났습니다! (1500토큰 강제 소멸)** 💀'; 
+                } 
+                else if (count4 === 3) { 
+                    curseType = '444'; 
+                    prize = -444.4;
+                    resultText = '👁️ **[3x1 사신 도래] 거둘 영혼이 정해졌습니다. (444.4토큰 소멸)** 👁️'; 
+                } 
+                else if (uniqueSymbols.size === 1 && row[0] === '7️⃣') { 
+                    prize = 500; 
+                    resultText = '👑 **[3x1 잭팟] 축하합니다! 신화의 벽을 뚫었습니다! (500토큰 획득)** 👑'; 
+                }
+                else if (uniqueSymbols.size === 1 && row[0] === '💎') { 
+                    prize = 300; 
+                    resultText = '💎 **[3x1 트레져헌터] 전설 속 고대 보물상자를 개봉했습니다! (300토큰 획득)** 💎'; 
+                }
+                // 2. 더블윙 검증 (가운데 상관없이 양 끝 날개가 네잎클로버 🍀)
+                else if (row[0] === '🍀' && row[2] === '🍀') {
+                    prize = 200;
+                    resultText = '🍀 **[3x1 더블윙] 양날개에 깃든 행운! 가운데를 감싸 안는 완벽한 대칭! (200토큰 획득)** 🍀';
+                }
+                // 3. 일반 트리플 검증 (나머지 일반 과일/종 심볼들의 3개 완벽 일치)
+                else if (uniqueSymbols.size === 1) {
                     const sym = row[0];
-                    if (sym === '7️⃣') { prize = 500; resultText = '👑 **[3x1 오리지널 잭팟] 트리플 7 세트 완료! (500토큰 획득)** 👑'; }
-                    else if (sym === '💎') { prize = 300; resultText = '💎 **[3x1 보석 트리플] 영롱한 다이아 정렬! (300토큰 획득)** 💎'; }
-                    else { prize = 150; resultText = `🎉 **[3x1 클래식 트리플] 컴플리트 매치! [ ${sym} ] (150토큰 획득)** 🎉`; }
-                } else if (row[0] === row[1] || row[1] === row[2] || row[0] === row[2]) {
-                    prize = 20; resultText = '🍀 **[3x1 더블 페어] 두 심볼이 짝을 이루었습니다. (20토큰 획득)**';
-                } else {
-                    prize = 0; resultText = '😭 **[3x1 낙첨] 다음 기회를 노려보세요!** 😭';
+                    prize = 100; 
+                    resultText = `🎉 **[3x1 트리플] 문양 3개가 완벽하게 정렬되었습니다! [ ${sym} ] (100토큰 획득)** 🎉`;
+                } 
+                // 4. 푸르티 잭팟 검증 (서로 다른 과일/종 3개)
+                else if (uniqueSymbols.size === 3 && row.every(s => fruitsAndBell.includes(s))) {
+                    prize = 150;
+                    resultText = '🍇🍊🍒 **[3x1 푸르티 잭팟] 상큼하게 믹스된 과일 정원! (150토큰 획득)**';
+                }
+                // 5. 넘버 잭팟 검증 (서로 다른 숫자 3개 조합: 7, 4, 6)
+                else if (uniqueSymbols.size === 3 && row.every(s => numbers.includes(s))) {
+                    prize = 65;
+                    resultText = '🔢 **[3x1 넘버 잭팟] 묘하게 얽힌 세 가지 숫자의 운명! (65토큰 획득)**';
+                }
+                // 6. 페어 검증 (종류 관계없이 2개 문양 일치)
+                else if (uniqueSymbols.size === 2) {
+                    prize = 50;
+                    resultText = '🍀 **[3x1 페어] 2개의 심볼이 짝을 지어 방어 성공! (50토큰 획득)**';
+                } 
+                // 7. 낙첨 (보상 5토큰 방어 지급)
+                else {
+                    prize = 5;
+                    resultText = '◽ **[3x1 낙첨] 아쉽게 비껴갔지만 소소한 위로금이 지급됩니다. (5토큰 획득)** ◽';
                 }
 
-                let netPrize = prize - slotPrice;
-                if (curseType === '666') netPrize = -slotPrice - 1500;
-                if (curseType === '444') netPrize = -slotPrice - 444.4;
-
-                return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
+                // [수정] applySlotWinnings에 판돈(slotPrice)과 당첨금(prize)을 따로 떼서 보냄
+                return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
             }
 
-            // Mode 2: [!슬롯7]
+            // Mode 2: [!슬롯7] - 규격 통합 처리
             if (command === '!슬롯7') {
                 let row = Array.from({ length: 7 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -397,20 +443,16 @@ client.on('messageCreate', async (message) => {
                 let resultText = '';
 
                 if (center === '7️⃣' && count7 >= 3) { prize = 400; resultText = '🔥 **[슬롯7 럭키마스터] 정중앙 7 안착 및 3성 정렬! (400토큰 획득)** 🔥'; }
-                else if (count6 >= 3) { curseType = '666'; resultText = '💀 **[슬롯7 심연의 지배] 판 내에 6이 3개 이상 증식했습니다! (1500토큰 소멸)** 💀'; }
-                else if (count4 >= 4) { curseType = '444'; resultText = '👁️ **[슬롯7 사계의 저주] 판 내에 4가 4개 이상 깔렸습니다! (444.4토큰 소멸)** 👁️'; }
+                else if (count6 >= 3) { curseType = '666'; prize = -1500; resultText = '💀 **[슬롯7 심연의 지배] 판 내에 6이 3개 이상 증식했습니다! (1500토큰 소멸)** 💀'; }
+                else if (count4 >= 4) { curseType = '444'; prize = -444.4; resultText = '👁️ **[슬롯7 사계의 저주] 판 내에 4가 4개 이상 깔렸습니다! (444.4토큰 소멸)** 👁️'; }
                 else if (center === '💎' || center === '7️⃣') { prize = 50; resultText = '✨ **[슬롯7 센터 조준] 핵심 코어에 고가치 심볼이 박혔습니다! (50토큰 획득)**'; }
                 else if (new Set(row).size <= 3) { prize = 120; resultText = '🎉 **[슬롯7 고밀도 조합] 문양들이 모여서 압축 당첨! (120토큰 획득)** 🎉'; }
                 else { prize = 5; resultText = '◽ **[슬롯7 소소] 소소한 과일 찌꺼기 보상입니다. (5토큰 획득)**'; }
 
-                let netPrize = prize - slotPrice;
-                if (curseType === '666') netPrize = -slotPrice - 1500;
-                if (curseType === '444') netPrize = -slotPrice - 444.4;
-
-                return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
+                return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
             }
 
-            // Mode 3: [!슬롯53]
+            // Mode 3: [!슬롯53] - 규격 통합 처리
             if (command === '!슬롯53') {
                 let matrix = [];
                 let slotDisplay = '';
@@ -433,10 +475,10 @@ client.on('messageCreate', async (message) => {
                 const row3Set = new Set(matrix[2]);
 
                 if (total6 >= 5) {
-                    curseType = '666';
+                    curseType = '666'; prize = -1500;
                     resultText = '💀☠️ **[5x3 대재앙] 보드 전체가 지옥의 숫자로 오염되었습니다!!! 1500토큰이 강제 소멸합니다!** ☠️💀';
                 } else if (total4 >= 6) {
-                    curseType = '444';
+                    curseType = '444'; prize = -444.4;
                     resultText = '👁️🚨 **[5x3 죽음의 낙인] 사(死)의 에너지가 폭발합니다! 444.4토큰이 영구 차감됩니다!** 🚨👁️';
                 } else if (row2Set.size === 1) { 
                     const sym = matrix[1][0];
@@ -460,11 +502,7 @@ client.on('messageCreate', async (message) => {
                     }
                 }
 
-                let netPrize = prize - slotPrice;
-                if (curseType === '666') netPrize = -slotPrice - 1500;
-                if (curseType === '444') netPrize = -slotPrice - 444.4;
-
-                return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
+                return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
             }
         } catch (err) {
             console.error(err);
@@ -497,7 +535,6 @@ client.on('messageCreate', async (message) => {
             if (!client.slot25Data) client.slot25Data = new Map();
             client.slot25Data.set(userId, { hiddenBoard, timestamp: Date.now() });
 
-            // 🛠️ 안내문구 직관성 수정 (!숫자 숫자 숫자)
             return message.reply(
                 `🎲 **[슬롯25: 2x5 뒤집기 스페셜 도박판]** 판돈 **25 토큰** 대기 완료.\n` +
                 `아래 10개의 뒷면 카드 중 대박 상금이 숨겨진 **3개의 번호**를 찍으세요!\n\n` +
@@ -511,16 +548,14 @@ client.on('messageCreate', async (message) => {
         } catch (e) { return message.reply("슬롯25 생성 실패."); }
     }
 
-    // 🛠️ !숫자로 시작하는 패턴 감지 (!1 5 8 형태 처리)
+    // 🎰 [!슬롯25용 인터셉터] !숫자로 시작하는 패턴 감지 (!1 5 8 형태 처리)
     if (command && command.startsWith('!') && !isNaN(command.slice(1))) {
         try {
             if (!client.slot25Data || !client.slot25Data.has(userId)) {
                 return message.reply("❌ 먼저 \`!슬롯25\`로 도박판 판때기를 생성해야 합니다!");
             }
 
-            // 첫 번째 숫자는 command에서 추출 (!1 -> 1)
             const firstNum = command.slice(1);
-            // 전체 숫자 배열 합치기 (예: ['1', '5', '8'])
             const allNumbers = [firstNum, ...args];
 
             if (allNumbers.length !== 3) {
@@ -550,9 +585,9 @@ client.on('messageCreate', async (message) => {
             const slotDisplay = `🎰 **선택 카드 뒤집기 결과:** [ ${s1} | ${s2} | ${s3} ]`;
 
             if (s1 === '6️⃣' && s2 === '6️⃣' && s3 === '6️⃣') {
-                curseType = '666'; resultText = '💀 **[슬롯25 대재앙] 6 6 6 무덤 리빌! 1500토큰이 증발합니다!** 💀';
+                curseType = '666'; prize = -1500; resultText = '💀 **[슬롯25 대재앙] 6 6 6 무덤 리빌! 1500토큰이 증발합니다!** 💀';
             } else if (s1 === '4️⃣' && s2 === '4️⃣' && s3 === '4️⃣') {
-                curseType = '444'; resultText = '👁️ **[슬롯25 사선 오픈] 4 4 4 금기 봉인 해제! 444.4토큰 소멸!** 👁️';
+                curseType = '444'; prize = -444.4; resultText = '👁️ **[슬롯25 사선 오픈] 4 4 4 금기 봉인 해제! 444.4토큰 소멸!** 👁️';
             } else if (s1 === s2 && s2 === s3) {
                 if (s1 === '7️⃣') { prize = 1500; resultText = '🔥 **[슬롯25 신화 트리플] 황금의 손가락! 777 저격 완료! (1500토큰 획득)** 🔥'; }
                 else if (s1 === '💎') { prize = 900; resultText = '💎 **[슬롯25 쥬얼 트리플] 다이아몬드 광맥 채굴 성공! (900토큰 획득)** 💎'; }
@@ -564,11 +599,7 @@ client.on('messageCreate', async (message) => {
             }
 
             const slotPrice = 25;
-            let netPrize = prize - slotPrice;
-            if (curseType === '666') netPrize = -slotPrice - 1500;
-            if (curseType === '444') netPrize = -slotPrice - 444.4;
-
-            return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
+            return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
 
         } catch (err) { console.error(err); return message.reply("슬롯25 선택 처리기 가동 실패."); }
     }
@@ -636,7 +667,9 @@ client.on('messageCreate', async (message) => {
                 `• 당첨 번호: [ ${winningNumbers.join(', ')} ] + 보너스 [ ${bonusNumber} ]\n` +
                 `-----------------------------------------\n` +
                 `🎯 결과: ${resultMessage} (맞춘 개수: ${matchedCount}개)\n` +
-                `💰 변동: 상금 [ +${prize} ] / 판돈 [ -${lottoPrice} ] | 잔액: ${finalTokens} 토큰`
+                `💸 판돈 차감: [ -${lottoPrice} 토큰 ]\n` +
+                `🎁 당첨 보상: [ +${prize} 토큰 ]\n` +
+                `💳 현재 잔액: ${finalTokens} 토큰`
             );
         } catch (err) { return message.reply("로또 구동 실패."); }
     }
