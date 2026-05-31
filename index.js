@@ -102,7 +102,7 @@ async function runJaewonAttendance() {
     return { success: true, streak: newStreak, remainingTokens: currentTokens };
 }
 
-// 😈 [가변 확률 제어 엔진] 상금 정산 및 확률 유지/증가 처리
+// 😈 [가변 확률 제어 엔진] 상금 정산 및 개인 격리 확률 관리 로직
 async function applySlotWinnings(message, userId, user, netPrize, resultText, slotDisplay, slotPrice, curseType = null) {
     let currentP444 = user.p_444 ?? 4.0;
     let currentP666 = user.p_666 ?? 1.0;
@@ -110,11 +110,13 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
     let newP444 = currentP444;
     let newP666 = currentP666;
 
+    // 저주가 터지면 리셋
     if (curseType === '444') {
         newP444 = 4.0;
     } else if (curseType === '666') {
         newP666 = 1.0;
     } 
+    // ✨ 돈이 깎일 때는 확률이 깎이지 않고 철저히 유지됨. 오직 보상을 받을 때(수익 발생)만 저주 확률 상승!
     else if (netPrize > 0) {
         newP444 = Math.min(currentP444 + 0.4, 99.0);
         newP666 = Math.min(currentP666 + 0.5, 99.0);
@@ -122,12 +124,12 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
 
     if (Math.floor(currentP444 / 10) < Math.floor(newP444 / 10)) {
         try {
-            await message.author.send(`⚠️ **[경고]** 슬롯머신 과과금으로 인해 **444 사(死)의 저주 확률**이 **${Math.floor(newP444)}%**를 돌파했습니다!`);
+            await message.author.send(`⚠️ **[개인 경고]** 슬롯머신 수익 누적으로 인해 **444 사(死)의 저주 확률**이 **${Math.floor(newP444)}%**를 돌파했습니다!`);
         } catch (e) {}
     }
     if (Math.floor(currentP666 / 10) < Math.floor(newP666 / 10)) {
         try {
-            await message.author.send(`💀 **[극비 경고]** 심연의 존재가 주시합니다. **666 지옥의 저주 확률**이 **${Math.floor(newP666)}%**를 돌파했습니다!`);
+            await message.author.send(`💀 **[개인 극비 경고]** 심연의 존재가 주시합니다. **666 지옥의 저주 확률**이 **${Math.floor(newP666)}%**를 돌파했습니다!`);
         } catch (e) {}
     }
 
@@ -135,6 +137,7 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
     if (finalTokens < 0) finalTokens = 0;
     finalTokens = Math.round(finalTokens * 100) / 100;
 
+    // 각 유저 고유 ID 매칭 데이터베이스 격리 저장
     await supabase.from('attendance').upsert({
         user_id: userId,
         username: message.author.username,
@@ -154,7 +157,7 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
         `-------------------------\n` +
         `${resultText}\n` +
         `💰 **정산:** 상금 및 변동 ${displayPrizeText} / 판돈 [ -${slotPrice} 토큰 ]\n` +
-        `💳 **현재 잔액:** ${finalTokens} 토큰 (444: ${newP444.toFixed(1)}% | 666: ${newP666.toFixed(1)}%)`
+        `💳 **현재 잔액:** ${finalTokens} 토큰 (나의 444: ${newP444.toFixed(1)}% | 나의 666: ${newP666.toFixed(1)}%)`
     );
 }
 
@@ -224,7 +227,6 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     const { today, currentHour } = getKSTInfo();
 
-    // 명령어 소문자화 및 공백 기준 분리 구문 분석기
     const commandBody = message.content.trim();
     const args = commandBody.split(' ');
     const command = args.shift();
@@ -295,27 +297,43 @@ client.on('messageCreate', async (message) => {
         } catch (err) { return message.reply("환불 오류."); }
     }
 
-    // =========================================================
-    // 🃏 [NEW] !도박 요약 가이드라인
-    // =========================================================
     if (command === '!도박') {
         return message.reply(
             `🎲 **[도박 시스템 안내소]** 🎲\n` +
             `원하는 도박판의 명령어를 입력하세요. (기본 판돈: 슬롯 25토큰 / 로또 수동 50, 자동 55토큰)\n\n` +
             `🎰 **슬롯머신 계열**\n` +
-            `• \`!슬롯3\` : 우리가 원래 하던 클래식 3x1 슬롯머신\n` +
+            `• \`!슬롯3\` : 우리가 원래 하던 클래식 3x1 슬롯머신 (개인 가변 확률 적용)\n` +
             `• \`!슬롯53\` : 5열 3행 완벽 격자 대형 도박판\n` +
             `• \`!슬롯35\` : 3열 5행 보드에서 고르는 15칸 뒤집기 스페셜\n` +
             `• \`!슬롯7\` : 7열 1행 초고속 한 줄 다이렉트 도박판\n\n` +
             `🎫 **로또 복권 계열**\n` +
             `• \`!로또자동\` : 마킹을 기계에 맡기는 자동 복권 구매\n` +
             `• \`!로또수동\` : 내 직감으로 번호 6개를 직접 입력 (\`!로또수동 번호1 번호2 ...\`)\n\n` +
+            `🚪 **확률 제어 시스템**\n` +
+            `• \`!종료\` : 본인에게 쌓인 444, 666 저주 누적 확률을 초기 기본값으로 리셋\n\n` +
             `👉 *원하는 명령어를 선택하여 입력해주세요!*`
         );
     }
 
     // =========================================================
-    // 🎰 슬롯머신 도박 엔진 종합 관리
+    // 🚪 [NEW] !종료 - 개인 저주 누적 확률 세션 리셋 시스템
+    // =========================================================
+    if (command === '!종료') {
+        try {
+            const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
+            if (!user) return message.reply("ℹ️ 생성된 도박 정보가 등록되어 있지 않은 신규 사용자입니다.");
+
+            await supabase.from('attendance').update({
+                p_444: 4.0,
+                p_666: 1.0
+            }).eq('user_id', userId);
+
+            return message.reply(`🚪 **[세션 종료]** <@${userId}>님의 슬롯 가변 저주 확률이 기본 수치로 안전하게 리셋되었습니다! (444: 4.0% | 666: 1.0%)`);
+        } catch (e) { return message.reply("❌ 세션 초기화 에러 발생"); }
+    }
+
+    // =========================================================
+    // 🎰 슬롯머신 도박 엔진 종합 관리 (개격 시스템 적용)
     // =========================================================
     if (['!슬롯3', '!슬롯53', '!슬롯7'].includes(command)) {
         try {
@@ -339,7 +357,7 @@ client.on('messageCreate', async (message) => {
             };
 
             // -----------------------------------------------------
-            // Mode 1: [!슬롯3] - 3열 1행 클래식 원형 복원
+            // Mode 1: [!슬롯3] - 3열 1행 클래식 원형 복원 및 가변 확률 주입
             // -----------------------------------------------------
             if (command === '!슬롯3') {
                 let row = Array.from({ length: 3 }, generateSymbol);
@@ -554,7 +572,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // =========================================================
-    // 🎫 복권 시스템: !로또자동 / !로또수동 분기 안착
+    // 🎫 복권 시스템: !로또자동 / !로또수동
     // =========================================================
     if (command === '!로또자동' || command === '!로또수동') {
         try {
