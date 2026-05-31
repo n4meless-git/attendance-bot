@@ -90,7 +90,7 @@ async function runJaewonAttendance() {
 
     const currentCards = user ? (user.protection_cards ?? 0) : 0;
 
-    await supabase.from('attendance').upsert({
+    const { error: upsertError } = await supabase.from('attendance').upsert({
         user_id: JAEWON_ID,
         username: JAEWON_NAME,
         last_checkin: today,
@@ -99,30 +99,28 @@ async function runJaewonAttendance() {
         protection_cards: currentCards
     }, { onConflict: 'user_id' });
 
+    if (upsertError) throw upsertError;
+
     return { success: true, streak: newStreak, remainingTokens: currentTokens };
 }
 
-// 🎰 자산 정산 및 확률 영구 유지 핵심 엔진
+// 🎰 자산 정산 및 확률 영구 유지 핵심 엔진 (에러 차단 장치 도입)
 async function applySlotWinnings(message, userId, user, slotPrice, prize, resultText, slotDisplay, curseType = null) {
-    // 1. 기존 DB에 있던 확률 안전하게 상속
     let currentP444 = user.p_444 ?? 4.0;
     let currentP666 = user.p_666 ?? 1.0;
 
     let newP444 = currentP444;
     let newP666 = currentP666;
 
-    // 2. 가변 확률 누적 조건 최적화 (낙첨/소액 당첨 시에도 대입 누락 없이 확률 안전 유지)
     if (curseType === '444') {
         newP444 = 4.0;
     } else if (curseType === '666') {
         newP666 = 1.0;
     } else if (prize > slotPrice) { 
-        // 순수익이 양수(+토큰)일 때만 리스크 가중치 누적
         newP444 = Math.min(currentP444 + 0.4, 99.0);
         newP666 = Math.min(currentP666 + 0.5, 99.0);
     }
 
-    // 확률대 돌파 DM 알림 (실제 증가했을 때만 타겟 작동)
     if (newP444 > currentP444 && Math.floor(currentP444 / 10) < Math.floor(newP444 / 10)) {
         try { await message.author.send(`⚠️ **[개인 경고]** 슬롯머신 수익 누적으로 인해 **444 사(死)의 저주 확률**이 **${Math.floor(newP444)}%**를 돌파했습니다!`); } catch (e) {}
     }
@@ -130,24 +128,33 @@ async function applySlotWinnings(message, userId, user, slotPrice, prize, result
         try { await message.author.send(`💀 **[개인 극비 경고]** 심연의 존재가 주시합니다. **666 지옥의 저주 확률**이 **${Math.floor(newP666)}%**를 돌파했습니다!`); } catch (e) {}
     }
 
-    // 3. 💰 동기화 오류 원천 차단형 자산 연산 (시작 자산 기반 1회 통합 계산)
     let startTokens = user.tokens ?? 200;
     let finalTokens = startTokens - slotPrice + prize;
 
     if (finalTokens < 0) finalTokens = 0;
     finalTokens = Math.round(finalTokens * 100) / 100;
 
-    // 4. 수집 필드 전체 원자적 업데이트
-    await supabase.from('attendance').upsert({
+    // 4. DB 업데이트 시도 및 에러 트래킹 핸들러 확충
+    const { error: upsertError } = await supabase.from('attendance').upsert({
         user_id: userId,
         username: message.author.username,
         tokens: finalTokens,
         protection_cards: user.protection_cards ?? 0,
         streak: user.streak ?? 0,
-        last_checkin: user.last_checkin,
+        last_checkin: user.last_checkin ?? null,
         p_444: newP444,
         p_666: newP666
     }, { onConflict: 'user_id' });
+
+    // 🚨 DB 반영 실패 시 메모리 거짓 데이터를 디스코드에 뿌리지 않고 즉시 중단 및 에러 출력
+    if (upsertError) {
+        console.error("❌ 슬롯 결과 DB 반영 에러 발생:", upsertError);
+        return message.reply(
+            `❌ **[시스템 에러] 데이터베이스 저장에 실패하여 판돈 및 보상이 반영되지 않았습니다.**\n` +
+            `• **이유:** \`${upsertError.message}\`\n` +
+            `💡 만약 컬럼 에러라면 Supabase SQL Editor에서 알림 컬럼 생성 스크립트를 실행했는지 확인하세요.`
+        );
+    }
 
     let displayPrize = prize >= 0 ? `+${prize} 토큰` : `${prize} 토큰`;
 
@@ -165,7 +172,6 @@ async function applySlotWinnings(message, userId, user, slotPrice, prize, result
 client.once('ready', () => {
     console.log(`✅ 봇 로그인 성공: ${client.user.tag}`);
 
-    // ⏰ 재원이 자동 대리 출근 (23시)
     cron.schedule('0 23 * * *', async () => {
         try {
             const result = await runJaewonAttendance();
@@ -175,7 +181,6 @@ client.once('ready', () => {
         } catch (err) { console.error(err); }
     }, { timezone: "Asia/Seoul" });
 
-    // 정각 알림 스케줄러
     cron.schedule('0 * * * *', async () => {
         const { today, currentHour } = getKSTInfo();
         const messageText = getRemindMessage(currentHour);
@@ -194,7 +199,6 @@ client.once('ready', () => {
         }
     }, { timezone: "Asia/Seoul" });
 
-    // 23시 59분 자동 방어권 소모 및 초기화
     cron.schedule('59 23 * * *', async () => {
         const { today } = getKSTInfo();
         const { data: allUsers } = await supabase.from('attendance').select('*');
@@ -330,9 +334,6 @@ client.on('messageCreate', async (message) => {
         } catch (e) { return message.reply("❌ 세션 초기화 에러 발생"); }
     }
 
-    // =========================================================
-    // 🎰 슬롯머신 도박 엔진 종합 관리
-    // =========================================================
     if (['!슬롯3', '!슬롯53', '!슬롯7'].includes(command)) {
         try {
             const slotPrice = 25;
@@ -354,7 +355,6 @@ client.on('messageCreate', async (message) => {
                 return baseEmojis[Math.floor(Math.random() * baseEmojis.length)];
             };
 
-            // Mode 1: [!슬롯3]
             if (command === '!슬롯3') {
                 let row = Array.from({ length: 3 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -417,7 +417,6 @@ client.on('messageCreate', async (message) => {
                 return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
             }
 
-            // Mode 2: [!슬롯7]
             if (command === '!슬롯7') {
                 let row = Array.from({ length: 7 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -441,7 +440,6 @@ client.on('messageCreate', async (message) => {
                 return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
             }
 
-            // Mode 3: [!슬롯53]
             if (command === '!슬롯53') {
                 let matrix = [];
                 let slotDisplay = '';
@@ -499,9 +497,6 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // =========================================================
-    // 🎰 Mode 4: [!슬롯25]
-    // =========================================================
     if (command === '!슬롯25') {
         try {
             const slotPrice = 25;
@@ -537,7 +532,6 @@ client.on('messageCreate', async (message) => {
         } catch (e) { return message.reply("슬롯25 생성 실패."); }
     }
 
-    // 🎰 [!슬롯25 인터셉터]
     if (command && command.startsWith('!') && !isNaN(command.slice(1))) {
         try {
             if (!client.slot25Data || !client.slot25Data.has(userId)) {
@@ -593,9 +587,6 @@ client.on('messageCreate', async (message) => {
         } catch (err) { console.error(err); return message.reply("슬롯25 선택 처리기 가동 실패."); }
     }
 
-    // =========================================================
-    // 🎫 복권 시스템: !로또자동 / !로또수동
-    // =========================================================
     if (command === '!로또자동' || command === '!로또수동') {
         try {
             const isAuto = (command === '!로또자동');
@@ -647,7 +638,11 @@ client.on('messageCreate', async (message) => {
             else if (matchedCount === 3) { resultMessage = '◽ 5등 당첨! 본전 수거! ◽'; prize = 25; }
 
             const finalTokens = currentTokens - lottoPrice + prize;
-            await supabase.from('attendance').update({ tokens: finalTokens }).eq('user_id', userId);
+            const { error: lottoDberr } = await supabase.from('attendance').update({ tokens: finalTokens }).eq('user_id', userId);
+
+            if (lottoDberr) {
+                return message.reply(`❌ **[로또 에러]** DB 트랜잭션 반영 실패: \`${lottoDberr.message}\``);
+            }
 
             return message.reply(
                 `🎫 **인생역전 로또 영수증** 🎫\n` +
@@ -663,9 +658,6 @@ client.on('messageCreate', async (message) => {
         } catch (err) { return message.reply("로또 구동 실패."); }
     }
 
-    // =========================================================
-    // 🏃 기본 출근 시스템
-    // =========================================================
     if (commandBody !== "출근" && commandBody !== "근출" && commandBody !== "출" && commandBody !== "근" && commandBody !== "出勤" && commandBody !== "ㅊㄱ" && commandBody !== "출첵" && commandBody !== "출석" && commandBody !== "attend" && commandBody !== "근." && commandBody !== "출." && commandBody !== "출 " && commandBody !== "근 " && commandBody !== "출군" && commandBody !== "앙" && commandBody !== "아잉" && commandBody !== "웅" && commandBody !== "출근해떠염" && commandBody !== "여자" && commandBody !== "ㅊㅊ" && commandBody !== "시기다른래퍼들의반대편을바라보던래퍼들의배포") return;
 
     if (currentHour >= 0 && currentHour < 4) {
