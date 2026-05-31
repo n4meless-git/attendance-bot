@@ -102,7 +102,7 @@ async function runJaewonAttendance() {
     return { success: true, streak: newStreak, remainingTokens: currentTokens };
 }
 
-// 😈 [가변 확률 제어 엔진] 상금 정산 및 개인 격리 확률 관리 로직
+// 😈 상금 정산 및 개인 격리 확률 관리 로직
 async function applySlotWinnings(message, userId, user, netPrize, resultText, slotDisplay, slotPrice, curseType = null) {
     let currentP444 = user.p_444 ?? 4.0;
     let currentP666 = user.p_666 ?? 1.0;
@@ -110,13 +110,11 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
     let newP444 = currentP444;
     let newP666 = currentP666;
 
-    // 저주가 터지면 리셋
     if (curseType === '444') {
         newP444 = 4.0;
     } else if (curseType === '666') {
         newP666 = 1.0;
     } 
-    // ✨ 돈이 깎일 때는 확률이 깎이지 않고 철저히 유지됨. 오직 보상을 받을 때(수익 발생)만 저주 확률 상승!
     else if (netPrize > 0) {
         newP444 = Math.min(currentP444 + 0.4, 99.0);
         newP666 = Math.min(currentP666 + 0.5, 99.0);
@@ -137,7 +135,6 @@ async function applySlotWinnings(message, userId, user, netPrize, resultText, sl
     if (finalTokens < 0) finalTokens = 0;
     finalTokens = Math.round(finalTokens * 100) / 100;
 
-    // 각 유저 고유 ID 매칭 데이터베이스 격리 저장
     await supabase.from('attendance').upsert({
         user_id: userId,
         username: message.author.username,
@@ -293,7 +290,7 @@ client.on('messageCreate', async (message) => {
                 streak: user ? user.streak : 0, last_checkin: user ? user.last_checkin : null
             }, { onConflict: 'user_id' });
 
-            return message.reply(`💸 환불 완료! 80 토큰 반환. (현재 보유: 💰 \`${currentTokens + 80}\` | 보호권: 🛡️ \`${currentCards - 1}개\`)`);
+            return message.reply(`💸 환불 완료! 80 토큰 반환. (현재 보유: 💰 \`${currentTokens + 80}\` | 보유 보호권: 🛡️ \`${currentCards - 1}개\`)`);
         } catch (err) { return message.reply("환불 오류."); }
     }
 
@@ -304,7 +301,7 @@ client.on('messageCreate', async (message) => {
             `🎰 **슬롯머신 계열**\n` +
             `• \`!슬롯3\` : 우리가 원래 하던 클래식 3x1 슬롯머신 (개인 가변 확률 적용)\n` +
             `• \`!슬롯53\` : 5열 3행 완벽 격자 대형 도박판\n` +
-            `• \`!슬롯35\` : 3열 5행 보드에서 고르는 15칸 뒤집기 스페셜\n` +
+            `• \`!슬롯25\` : 2열 5행 보드에서 고르는 10칸 뒤집기 스페셜 (입력: \`!1 5 8\`)\n` +
             `• \`!슬롯7\` : 7열 1행 초고속 한 줄 다이렉트 도박판\n\n` +
             `🎫 **로또 복권 계열**\n` +
             `• \`!로또자동\` : 마킹을 기계에 맡기는 자동 복권 구매\n` +
@@ -315,9 +312,6 @@ client.on('messageCreate', async (message) => {
         );
     }
 
-    // =========================================================
-    // 🚪 [NEW] !종료 - 개인 저주 누적 확률 세션 리셋 시스템
-    // =========================================================
     if (command === '!종료') {
         try {
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
@@ -333,7 +327,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // =========================================================
-    // 🎰 슬롯머신 도박 엔진 종합 관리 (개격 시스템 적용)
+    // 🎰 슬롯머신 도박 엔진 종합 관리
     // =========================================================
     if (['!슬롯3', '!슬롯53', '!슬롯7'].includes(command)) {
         try {
@@ -356,9 +350,7 @@ client.on('messageCreate', async (message) => {
                 return baseEmojis[Math.floor(Math.random() * baseEmojis.length)];
             };
 
-            // -----------------------------------------------------
-            // Mode 1: [!슬롯3] - 3열 1행 클래식 원형 복원 및 가변 확률 주입
-            // -----------------------------------------------------
+            // Mode 1: [!슬롯3]
             if (command === '!슬롯3') {
                 let row = Array.from({ length: 3 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -390,9 +382,7 @@ client.on('messageCreate', async (message) => {
                 return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
             }
 
-            // -----------------------------------------------------
-            // Mode 2: [!슬롯7] - 7열 1행 초고속 라인
-            // -----------------------------------------------------
+            // Mode 2: [!슬롯7]
             if (command === '!슬롯7') {
                 let row = Array.from({ length: 7 }, generateSymbol);
                 let slotDisplay = `[ ${row.join(' | ')} ]`;
@@ -420,9 +410,7 @@ client.on('messageCreate', async (message) => {
                 return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
             }
 
-            // -----------------------------------------------------
-            // Mode 3: [!슬롯53] - 5열 3행 완벽 격자
-            // -----------------------------------------------------
+            // Mode 3: [!슬롯53]
             if (command === '!슬롯53') {
                 let matrix = [];
                 let slotDisplay = '';
@@ -484,10 +472,10 @@ client.on('messageCreate', async (message) => {
         }
     }
 
-    // -----------------------------------------------------
-    // Mode 4: [!슬롯35] - 15칸 뒤집기 스페셜 도박판 생성
-    // -----------------------------------------------------
-    if (command === '!슬롯35') {
+    // =========================================================
+    // 🎰 Mode 4: [!슬롯25] - 2열 5행(10칸) 뒤집기 스페셜
+    // =========================================================
+    if (command === '!슬롯25') {
         try {
             const slotPrice = 25;
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
@@ -499,41 +487,55 @@ client.on('messageCreate', async (message) => {
             const chance666 = (u.p_666 ?? 1.0) / 100;
             const chance444 = (u.p_444 ?? 4.0) / 100;
 
-            const hiddenBoard = Array.from({ length: 15 }, () => {
+            const hiddenBoard = Array.from({ length: 10 }, () => {
                 const rand = Math.random();
                 if (rand < chance666) return '6️⃣';
                 if (rand < chance666 + chance444) return '4️⃣';
                 return baseEmojis[Math.floor(Math.random() * baseEmojis.length)];
             });
 
-            if (!client.slot35Data) client.slot35Data = new Map();
-            client.slot35Data.set(userId, { hiddenBoard, timestamp: Date.now() });
+            if (!client.slot25Data) client.slot25Data = new Map();
+            client.slot25Data.set(userId, { hiddenBoard, timestamp: Date.now() });
 
+            // 🛠️ 안내문구 직관성 수정 (!숫자 숫자 숫자)
             return message.reply(
-                `🎲 **[슬롯35: 스페셜 뒤집기 도박판]** 판돈 **25 토큰** 대기 완료.\n` +
-                `아래 15개의 뒷면 카드 중 대박 상금이 숨겨진 **3개의 번호**를 찍으세요!\n\n` +
-                `1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣\n6️⃣ 7️⃣ 8️⃣ 9️⃣ 🔟\n⑪ ⑫ ⑬ ⑭ ⑮\n\n` +
-                `👉 **명령어:** \`!선택 3 7 12\` (공백으로 구분된 1~15 사이 숫자 3개)`
+                `🎲 **[슬롯25: 2x5 뒤집기 스페셜 도박판]** 판돈 **25 토큰** 대기 완료.\n` +
+                `아래 10개의 뒷면 카드 중 대박 상금이 숨겨진 **3개의 번호**를 찍으세요!\n\n` +
+                `1️⃣  2️⃣\n` +
+                `3️⃣  4️⃣\n` +
+                `5️⃣  6️⃣\n` +
+                `7️⃣  8️⃣\n` +
+                `9️⃣  🔟\n\n` +
+                `👉 **입력 예시:** \`!1 5 8\` (공백으로 구분된 1~10 사이 숫자 3개)`
             );
-        } catch (e) { return message.reply("슬롯35 생성 실패."); }
+        } catch (e) { return message.reply("슬롯25 생성 실패."); }
     }
 
-    if (command === '!선택') {
+    // 🛠️ !숫자로 시작하는 패턴 감지 (!1 5 8 형태 처리)
+    if (command && command.startsWith('!') && !isNaN(command.slice(1))) {
         try {
-            if (!client.slot35Data || !client.slot35Data.has(userId)) {
-                return message.reply("❌ 먼저 \`!슬롯35\`로 도박판 판때기를 먼저 생성해야 합니다!");
+            if (!client.slot25Data || !client.slot25Data.has(userId)) {
+                return message.reply("❌ 먼저 \`!슬롯25\`로 도박판 판때기를 생성해야 합니다!");
             }
 
-            if (args.length !== 3) return message.reply("❌ 정확히 3개의 카드 번호를 입력하세요! 예: \`!선택 1 9 15\`");
+            // 첫 번째 숫자는 command에서 추출 (!1 -> 1)
+            const firstNum = command.slice(1);
+            // 전체 숫자 배열 합치기 (예: ['1', '5', '8'])
+            const allNumbers = [firstNum, ...args];
 
-            const chosenIndices = args.map(num => parseInt(num, 10) - 1);
-            const isValid = chosenIndices.every(idx => idx >= 0 && idx < 15 && !isNaN(idx));
+            if (allNumbers.length !== 3) {
+                return message.reply("❌ 정확히 3개의 카드 번호를 입력하세요! 예: \`!1 4 10\`");
+            }
+
+            const chosenIndices = allNumbers.map(num => parseInt(num, 10) - 1);
+            
+            const isValid = chosenIndices.every(idx => idx >= 0 && idx < 10 && !isNaN(idx));
             const isUnique = new Set(chosenIndices).size === 3;
 
-            if (!isValid || !isUnique) return message.reply("❌ 1부터 15 사이의 중복 없는 올바른 보드 인덱스를 고르셔야 합니다.");
+            if (!isValid || !isUnique) return message.reply("❌ 1부터 10 사이의 중복 없는 올바른 보드 인덱스를 고르셔야 합니다.");
 
-            const session = client.slot35Data.get(userId);
-            client.slot35Data.delete(userId); 
+            const session = client.slot25Data.get(userId);
+            client.slot25Data.delete(userId); 
 
             const { data: user } = await supabase.from('attendance').select('*').eq('user_id', userId).maybeSingle();
             const u = user || { tokens: 200, p_444: 4.0, p_666: 1.0 };
@@ -548,17 +550,17 @@ client.on('messageCreate', async (message) => {
             const slotDisplay = `🎰 **선택 카드 뒤집기 결과:** [ ${s1} | ${s2} | ${s3} ]`;
 
             if (s1 === '6️⃣' && s2 === '6️⃣' && s3 === '6️⃣') {
-                curseType = '666'; resultText = '💀 **[슬롯35 대재앙] 6 6 6 무덤 리빌! 1500토큰이 증발합니다!** 💀';
+                curseType = '666'; resultText = '💀 **[슬롯25 대재앙] 6 6 6 무덤 리빌! 1500토큰이 증발합니다!** 💀';
             } else if (s1 === '4️⃣' && s2 === '4️⃣' && s3 === '4️⃣') {
-                curseType = '444'; resultText = '👁️ **[슬롯35 사선 오픈] 4 4 4 금기 봉인 해제! 444.4토큰 소멸!** 👁️';
+                curseType = '444'; resultText = '👁️ **[슬롯25 사선 오픈] 4 4 4 금기 봉인 해제! 444.4토큰 소멸!** 👁️';
             } else if (s1 === s2 && s2 === s3) {
-                if (s1 === '7️⃣') { prize = 1500; resultText = '🔥 **[슬롯35 신화 트리플] 황금의 손가락! 777 저격 완료! (1500토큰 획득)** 🔥'; }
-                else if (s1 === '💎') { prize = 900; resultText = '💎 **[슬롯35 쥬얼 트리플] 다이아몬드 광맥 채굴 성공! (900토큰 획득)** 💎'; }
-                else { prize = 150; resultText = `🎰 **[슬롯35 일반 트리플] 골라잡은 트리플 라인! (150토큰 획득)** 🎰`; }
+                if (s1 === '7️⃣') { prize = 1500; resultText = '🔥 **[슬롯25 신화 트리플] 황금의 손가락! 777 저격 완료! (1500토큰 획득)** 🔥'; }
+                else if (s1 === '💎') { prize = 900; resultText = '💎 **[슬롯25 쥬얼 트리플] 다이아몬드 광맥 채굴 성공! (900토큰 획득)** 💎'; }
+                else { prize = 150; resultText = `🎰 **[슬롯25 일반 트리플] 골라잡은 트리플 라인! (150토큰 획득)** 🎰`; }
             } else if ((s1 === s2 || s2 === s3 || s1 === s3) && s1 !== '6️⃣' && s2 !== '6️⃣' && s3 !== '6️⃣' && s1 !== '4️⃣' && s2 !== '4️⃣' && s3 !== '4️⃣') {
-                prize = 30; resultText = '🎉 **[슬롯35 페어 매치] 2개의 카드가 일치하여 소소하게 방어 성공! (30토큰 획득)** 🎉';
+                prize = 30; resultText = '🎉 **[슬롯25 페어 매치] 2개의 카드가 일치하여 소소하게 방어 성공! (30토큰 획득)** 🎉';
             } else {
-                prize = 0; resultText = '😭 **[슬롯35 낙첨] 카드들이 서로 엇갈렸습니다. 감이 부족했네요!** 😭';
+                prize = 0; resultText = '😭 **[슬롯25 낙첨] 카드들이 서로 엇갈렸습니다. 감이 부족했네요!** 😭';
             }
 
             const slotPrice = 25;
@@ -568,7 +570,7 @@ client.on('messageCreate', async (message) => {
 
             return applySlotWinnings(message, userId, u, netPrize, resultText, slotDisplay, slotPrice, curseType);
 
-        } catch (err) { console.error(err); return message.reply("슬롯35 선택 처리기 가동 실패."); }
+        } catch (err) { console.error(err); return message.reply("슬롯25 선택 처리기 가동 실패."); }
     }
 
     // =========================================================
