@@ -322,6 +322,8 @@ client.on('messageCreate', async (message) => {
             `• 🔮 **[데칼코마니]** \`+353\` ── 좌우 데칼코마니 대칭 형태\n` +
             `• 🎯 **[명사수]** \`+300\` ── 중앙 3칸에 7,6,4가 중복 없이 무작위 안착\n` +
             `• 🌈 **[잡화점]** \`+200\` ── 7칸 모두 다른 문양 등장\n` +
+            `• 💥 **[멀티 스트라이크]** ── 아래 미니 트리플 연속 조합이 2개 이상 중복 발생 시 **[최고 보상의 2배]** 지급\n` +
+            `• 🔥 **[미니 트리플]** ── 7️⃣7️⃣7️⃣ 연속(\`+7\`) / 6️⃣6️⃣6️⃣ 연속(\`+6\`) / 4️⃣4️⃣4️⃣ 연속(\`+4\`)\n` +
             `• ◽ **[본전 환급]** \`+25\` ── 노조합 시 판돈 보존`
         );
     }
@@ -413,13 +415,28 @@ client.on('messageCreate', async (message) => {
                     return (indices[1] - indices[0] > 1) && (indices[2] - indices[1] > 1);
                 };
 
+                // 🔍 연속 3칸 겹침 매칭 스캔 엔진
+                let has777 = false;
+                let has666 = false;
+                let has444 = false;
+                for (let i = 0; i <= 4; i++) {
+                    if (row[i] === '7️⃣' && row[i+1] === '7️⃣' && row[i+2] === '7️⃣') has777 = true;
+                    if (row[i] === '6️⃣' && row[i+1] === '6️⃣' && row[i+2] === '6️⃣') has666 = true;
+                    if (row[i] === '4️⃣' && row[i+1] === '4️⃣' && row[i+2] === '4️⃣') has444 = true;
+                }
+
+                let matchedTypes = [];
+                if (has777) matchedTypes.push({ name: '7️⃣7️⃣7️⃣ 연속', prize: 7 });
+                if (has666) matchedTypes.push({ name: '6️⃣6️⃣6️⃣ 연속', prize: 6 });
+                if (has444) matchedTypes.push({ name: '4️⃣4️⃣4️⃣ 연속', prize: 4 });
+
                 let prize = 25; 
                 let curseType = null;
                 let resultText = '◽ **[슬롯7 본전] 아무런 패턴이 없으나 판돈을 그대로 돌려받습니다. (+25토큰 환급)**';
 
                 const rowStr = row.join('');
 
-                // 💥 67 크래시 판정 (SixSeven 조합 판정 최상단 위치)
+                // 💥 SixSeven 크래시 판정 (최상단 위치)
                 if (rowStr.includes('6️⃣7️⃣')) {
                     prize = 0;
                     resultText = '💥 **[슬롯7 SixSeven]** 6️⃣7️⃣ 연쇄 조합이 인접하여 도박판 판돈과 당첨금이 모두 소멸했습니다! (0토큰 처리)';
@@ -487,6 +504,16 @@ client.on('messageCreate', async (message) => {
                 else if (new Set(row).size === 7) {
                     prize = 200;
                     resultText = '🌈 **[슬롯7 잡화점] 단 하나도 겹치지 않는 기묘한 수집품들! (+200토큰 획득)** 🌈';
+                }
+                // 🔥 연속 조합 복합 판정 단락 (중복 시 최고 배당의 2배 적용)
+                else if (matchedTypes.length >= 2) {
+                    let maxPrize = Math.max(...matchedTypes.map(t => t.prize));
+                    prize = maxPrize * 2;
+                    resultText = `💥 **[슬롯7 멀티 스트라이크]** 두 개 이상의 연속 조합 유형이 겹쳤습니다! 최고 보상(${maxPrize}토큰)의 2배가 적용됩니다. (+${prize}토큰 획득)`;
+                }
+                else if (matchedTypes.length === 1) {
+                    prize = matchedTypes[0].prize;
+                    resultText = `🔥 **[슬롯7 미니 트리플]** 연속 배치 성공! [${matchedTypes[0].name}] 패턴 보상이 지급됩니다. (+${prize}토큰 획득)`;
                 }
 
                 return applySlotWinnings(message, userId, u, slotPrice, prize, resultText, slotDisplay, curseType);
