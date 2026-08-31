@@ -2,59 +2,8 @@ require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 const cron = require('node-cron');
-
-// index.js 상단 어딘가에 이미 있을 코드
 const mining = require('./mining');
 
-// 메시지 이벤트 리스너 내부
-client.on('messageCreate', async (message) => {
-  // 봇이 보낸 메시지는 무시
-  if (message.author.bot) return;
-
-  const isMiningCommand = await mining.handleMiningCommand(message);
-  if (isMiningCommand) return;
-
-  const args = message.content.trim().split(/ +/);
-  const command = args.shift();
-
-  // 기존 출석 체크 등 다른 명령어 처리 코드...
-  // if (command === '!출석') { ... }
-
-  // ==========================================
-  // [추가할 부분] 광산 및 채굴 시스템 명령어 라우팅
-  // ==========================================
-  try {
-    if (['!광산', '!채굴', '!광물', '!광물판매', '!수리', '!강화'].includes(command)) {
-      
-      switch (command) {
-        case '!광산':
-          // mining.js에 export 된 광산 상태 확인 함수 호출
-          await mining.showMine(message); 
-          break;
-        case '!채굴':
-          // mining_mine RPC를 호출하는 그 함수
-          await mining.doMine(message); 
-          break;
-        case '!광물':
-          await mining.showInventory(message);
-          break;
-        case '!광물판매':
-          await mining.sellMinerals(message, args);
-          break;
-        case '!수리':
-          await mining.repair(message);
-          break;
-        case '!강화':
-          await mining.upgrade(message);
-          break;
-      }
-    }
-  } catch (error) {
-    console.error(`[Mining Error] ${command} 실행 중 오류:`, error);
-    message.reply('광산 시스템 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-  }
-  // ==========================================
-});
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const client = new Client({
     intents: [
