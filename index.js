@@ -11,6 +11,9 @@ client.on('messageCreate', async (message) => {
   // 봇이 보낸 메시지는 무시
   if (message.author.bot) return;
 
+  const isMiningCommand = await mining.handleMiningCommand(message);
+  if (isMiningCommand) return;
+
   const args = message.content.trim().split(/ +/);
   const command = args.shift();
 
