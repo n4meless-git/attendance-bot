@@ -223,6 +223,12 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
+        // ⛏️ BLACK MINE
+    // 기존 출근/도박 시스템과 독립적으로 처리
+    if (await mining.handleMiningCommand(message)) {
+        return;
+    }
+
     const userId = message.author.id;
     const { today, currentHour } = getKSTInfo();
 
