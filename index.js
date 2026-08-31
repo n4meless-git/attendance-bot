@@ -3,6 +3,8 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { createClient } = require('@supabase/supabase-js');
 const cron = require('node-cron');
 
+const mining = require('./mining');
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const client = new Client({
     intents: [
