@@ -368,9 +368,15 @@ async function mine(message) {
 // 🎒 !광물
 // =========================================================
 
-async function showInventory(message) {
+// ---------------------------------------------------------
+// 🔢 인벤토리 슬롯
+//
+// !광물 표시 순서와 !광판 슬롯 번호가 항상 같도록
+// (min_depth 오름차순 → ore_id 오름차순) 으로 고정 정렬한다.
+// 정렬 기준을 바꾸면 슬롯 번호가 흔들리므로 주의.
+// ---------------------------------------------------------
 
-    const userId = message.author.id;
+async function getInventorySlots(userId) {
 
     const { data, error } =
         await supabase
@@ -382,16 +388,44 @@ async function showInventory(message) {
                     name,
                     emoji,
                     sell_price,
-                    rarity
+                    rarity,
+                    min_depth
                 )
             `)
             .eq('user_id', userId)
-            .gt('amount', 0)
-            .order('amount', {
-                ascending: false
-            });
+            .gt('amount', 0);
 
     if (error) {
+        throw error;
+    }
+
+    const rows = data || [];
+
+    rows.sort((a, b) => {
+
+        const da = a.mining_ores?.min_depth ?? 0;
+        const db = b.mining_ores?.min_depth ?? 0;
+
+        if (da !== db) {
+            return da - db;
+        }
+
+        return a.ore_id.localeCompare(b.ore_id);
+    });
+
+    return rows;
+}
+
+
+async function showInventory(message) {
+
+    const userId = message.author.id;
+
+    let data;
+
+    try {
+        data = await getInventorySlots(userId);
+    } catch (error) {
 
         console.error(
             '❌ inventory error:',
@@ -416,7 +450,7 @@ async function showInventory(message) {
 
     let totalValue = 0;
 
-    const lines = data.map(item => {
+    const lines = data.map((item, index) => {
 
         const ore = item.mining_ores;
 
@@ -431,8 +465,11 @@ async function showInventory(message) {
 
         totalValue += value;
 
+        const slot =
+            String(index + 1).padStart(2, ' ');
+
         return (
-            `${ore.emoji} **${ore.name}** ` +
+            `\`${slot}.\` ${ore.emoji} **${ore.name}** ` +
             `× \`${amount}\`` +
             ` — ${value >= 0 ? '+' : ''}${value} 토큰`
         );
@@ -444,7 +481,9 @@ async function showInventory(message) {
         `━━━━━━━━━━━━━━━━━━━━\n` +
         lines.join('\n') +
         `\n━━━━━━━━━━━━━━━━━━━━\n` +
-        `💰 **전체 판매 가치:** \`${totalValue}\` 토큰`
+        `💰 **전체 판매 가치:** \`${totalValue}\` 토큰\n\n` +
+        `💡 \`!광판 1 1\` — 1번 칸에서 1개 판매\n` +
+        `💡 \`!광판 1 all\` — 1번 칸 전부 판매`
     );
 }
 
@@ -466,17 +505,67 @@ async function sell(message, args) {
 
         return message.reply(
             `💰 **광물 판매 방법**\n\n` +
-            `\`!광물판매 diamond 1\`\n` +
-            `→ 다이아 1개 판매\n\n` +
-            `\`!광물판매 diamond all\`\n` +
-            `→ 보유한 다이아 전부 판매\n\n` +
+            `\`!광판 1 1\`\n` +
+            `→ 인벤토리 1번 칸에서 1개 판매\n\n` +
+            `\`!광판 1 all\`\n` +
+            `→ 1번 칸 전부 판매\n\n` +
+            `\`!광판 diamond 1\`\n` +
+            `→ 광물 ID로 판매도 가능\n\n` +
+            `칸 번호는 \`!광물\`, ` +
             `광물 ID는 \`!광물목록\`에서 확인하세요.`
         );
     }
 
 
-    const oreId =
-        args[0].toLowerCase();
+    // 첫 인자가 숫자면 인벤토리 슬롯 번호로 해석한다.
+    let oreId = args[0].toLowerCase();
+
+    if (/^\d+$/.test(oreId)) {
+
+        let slots;
+
+        try {
+            slots = await getInventorySlots(userId);
+        } catch (error) {
+
+            console.error(
+                '❌ inventory error:',
+                error
+            );
+
+            return message.reply(
+                '❌ 인벤토리를 불러오지 못했습니다.'
+            );
+        }
+
+
+        if (slots.length === 0) {
+
+            return message.reply(
+                `🎒 보유한 광물이 없습니다.\n` +
+                `⛏️ \`!채굴\`로 광물을 캐보세요!`
+            );
+        }
+
+
+        const index =
+            parseInt(oreId, 10) - 1;
+
+        if (
+            index < 0 ||
+            index >= slots.length
+        ) {
+
+            return message.reply(
+                `❌ \`${args[0]}\`번 칸은 비어 있습니다.\n` +
+                `현재 **1 ~ ${slots.length}번** 칸까지 있습니다.\n` +
+                `\`!광물\`로 확인하세요.`
+            );
+        }
+
+        oreId = slots[index].ore_id;
+    }
+
 
     let amount;
 
@@ -646,6 +735,197 @@ async function showOreList(message) {
         `⛏️ **광물 도감**\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
         lines.join('\n')
+    );
+}
+
+
+// =========================================================
+// 🔧 !수리
+// =========================================================
+
+// =========================================================
+// 🏪 !상점 / !구매
+// =========================================================
+
+const SHOP_ITEMS = {
+
+    '에너지바':   'energy_bar',
+    '에너지':     'energy_bar',
+    'energy':     'energy_bar',
+
+    '대용량':     'energy_pack',
+    '대용량에너지바': 'energy_pack',
+    'pack':       'energy_pack'
+};
+
+
+async function shop(message) {
+
+    const userId = message.author.id;
+
+    let tokens = 0;
+
+    try {
+        const attendance =
+            await getAttendanceUser(userId);
+
+        tokens =
+            getTokensFromUser(attendance);
+
+    } catch (error) {
+        console.error('❌ shop error:', error);
+    }
+
+
+    let energyText = '';
+
+    try {
+        const player =
+            await getMiningPlayer(userId);
+
+        const energy =
+            calculateCurrentEnergy(player);
+
+        energyText =
+            `⚡ **현재 에너지:** ` +
+            `\`${energy}/${player.max_energy}\`\n`;
+
+    } catch (error) {
+        console.error('❌ shop error:', error);
+    }
+
+
+    return message.reply(
+        `🏪 **광산 상점**\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        energyText +
+        `💰 **보유 토큰:** \`${tokens}\`\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n\n` +
+
+        `⚡ **에너지바** — \`120\` 토큰\n` +
+        `└ 에너지 **+5** 즉시 충전\n` +
+        `└ \`!구매 에너지바\` / \`!구매 에너지바 3\`\n\n` +
+
+        `🔋 **대용량 에너지바** — \`400\` 토큰\n` +
+        `└ 에너지 **완충**\n` +
+        `└ \`!구매 대용량\`\n\n` +
+
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `💡 최대치를 넘는 분량은 구매되지 않습니다.\n` +
+        `⚡ 에너지는 그냥 두어도 **30분마다 1** 회복됩니다.`
+    );
+}
+
+
+async function buy(message, args) {
+
+    const userId = message.author.id;
+
+    const key =
+        (args[0] || '')
+            .toLowerCase()
+            .replace(/\s+/g, '');
+
+
+    const item = SHOP_ITEMS[key];
+
+    if (!item) {
+
+        return message.reply(
+            `🏪 **구매할 물건을 지정하세요.**\n\n` +
+            `\`!구매 에너지바\`\n` +
+            `\`!구매 에너지바 3\`\n` +
+            `\`!구매 대용량\`\n\n` +
+            `전체 목록은 \`!상점\``
+        );
+    }
+
+
+    let qty = 1;
+
+    if (args[1]) {
+
+        qty = Number(args[1]);
+
+        if (
+            !Number.isInteger(qty) ||
+            qty <= 0
+        ) {
+
+            return message.reply(
+                '❌ 수량은 올바른 정수여야 합니다.'
+            );
+        }
+    }
+
+
+    const { data, error } =
+        await supabase.rpc(
+            'mining_buy_energy',
+            {
+                p_user_id: userId,
+                p_item:    item,
+                p_qty:     qty
+            }
+        );
+
+
+    if (error) {
+
+        console.error(
+            '❌ buy RPC error:',
+            error
+        );
+
+        return message.reply(
+            '❌ 구매 처리 중 오류가 발생했습니다.'
+        );
+    }
+
+
+    if (!data || !data.success) {
+
+        if (data?.reason === 'FULL_ENERGY') {
+
+            return message.reply(
+                `⚡ 에너지가 이미 가득 찼습니다!\n` +
+                `\`${data.energy}/${data.max_energy}\``
+            );
+        }
+
+
+        if (data?.reason === 'NO_TOKEN') {
+
+            return message.reply(
+                `💰 토큰이 부족합니다.\n` +
+                `필요: \`${data.cost}\`\n` +
+                `보유: \`${data.tokens}\``
+            );
+        }
+
+
+        if (data?.reason === 'NO_ACCOUNT') {
+
+            return message.reply(
+                '❌ 출근 기록이 없습니다. 먼저 출근해주세요!'
+            );
+        }
+
+
+        return message.reply(
+            '❌ 구매할 수 없습니다.'
+        );
+    }
+
+
+    return message.reply(
+        `🏪 **구매 완료!**\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `⚡ **${data.item_name}** × \`${data.qty}\`\n` +
+        `💸 결제: \`${data.cost}\` 토큰\n\n` +
+        `🔋 에너지: **+${data.gained}** ` +
+        `→ \`${data.energy}/${data.max_energy}\`\n` +
+        `💳 남은 토큰: \`${data.new_tokens}\``
     );
 }
 
@@ -951,8 +1231,14 @@ async function help(message) {
         `\`!광물목록\` — 전체 광물 도감\n\n` +
 
         `💰 **경제**\n` +
-        `\`!광물판매 diamond 1\`\n` +
-        `\`!광물판매 diamond all\`\n\n` +
+        `\`!광판 1 1\` — 1번 칸 1개 판매\n` +
+        `\`!광판 1 all\` — 1번 칸 전부 판매\n` +
+        `\`!광판 diamond 1\` — ID로 판매\n\n` +
+
+        `🏪 **상점**\n` +
+        `\`!상점\` — 판매 목록\n` +
+        `\`!구매 에너지바\` — 에너지 +5\n` +
+        `\`!구매 대용량\` — 에너지 완충\n\n` +
 
         `⛏️ **장비**\n` +
         `\`!수리\` — 곡괭이 수리\n` +
@@ -1028,7 +1314,19 @@ async function handleMiningCommand(message) {
 
 
             case '!광물판매':
+            case '!광판':
                 await sell(message, args);
+                return true;
+
+
+            case '!상점':
+            case '!광산상점':
+                await shop(message);
+                return true;
+
+
+            case '!구매':
+                await buy(message, args);
                 return true;
 
 
@@ -1085,6 +1383,8 @@ module.exports = {
   showInventory,
   showOreList,
   sell,
+  shop,
+  buy,
   repair,
   upgrade,
   ranking,
