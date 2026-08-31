@@ -1078,12 +1078,15 @@ async function handleMiningCommand(message) {
 }
 
 
-// mining.js 하단 예시
 module.exports = {
+  handleMiningCommand,
   showMine,
-  doMine,         // !채굴 입력 시 실행되는 함수
+  mine,
   showInventory,
-  sellMinerals,
+  showOreList,
+  sell,
   repair,
-  upgrade
+  upgrade,
+  ranking,
+  help
 };
